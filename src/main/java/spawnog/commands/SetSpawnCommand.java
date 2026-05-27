@@ -69,6 +69,12 @@ public class SetSpawnCommand implements CommandExecutor, TabCompleter {
 
         }
 
+        l.setX(round(l.getX()));
+        l.setY(round(l.getY()));
+        l.setZ(round(l.getZ()));
+        l.setYaw((float) round(l.getYaw()));
+        l.setPitch((float) round(l.getPitch()));
+
         cfg.set(path, l);
         SpawnOG.getInstance().saveConfig();
         p.sendMessage(cfg.getString("locale.spawnSet", "Spawn location updated."));
@@ -95,6 +101,12 @@ public class SetSpawnCommand implements CommandExecutor, TabCompleter {
 
         return out.stream().filter(s -> !current.contains(s))
                 .filter(s -> s.startsWith(args[args.length - 1].toLowerCase())).toList();
+
+    }
+
+    private double round(double d) {
+
+        return Math.round(d * 100.0) / 100.0;
 
     }
 
