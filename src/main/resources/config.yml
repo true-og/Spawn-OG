@@ -1,6 +1,8 @@
 spawn-on-join: default
 newbies:
   spawnpoint: newbie
+locale:
+  unsafeLogin: "<gold>You logged in at an unsafe location (<red><x>, <y>, <z></red> in <world>) and were teleported to spawn.</gold>"
 spawns:
   global:
     location:
