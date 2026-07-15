@@ -7,6 +7,10 @@ import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import spawnog.commands.SetSpawnCommand;
 import spawnog.commands.SpawnCommand;
+import spawnog.flight.RegionFlightService;
+import spawnog.flight.ToggleRegionFlightCommand;
+import spawnog.login.AutopsyMigrationStore;
+import spawnog.login.LoginMigrationService;
 import spawnog.listener.SpawnListener;
 
 @Slf4j
@@ -18,6 +22,9 @@ public final class SpawnOG extends JavaPlugin {
     @Getter
     private LuckPerms luckPerms;
 
+    private LoginMigrationService loginMigrationService;
+    private RegionFlightService regionFlightService;
+
     @Override
     public void onEnable() {
 
@@ -28,10 +35,37 @@ public final class SpawnOG extends JavaPlugin {
         if (rsp != null)
             luckPerms = rsp.getProvider();
 
-        register("spawn", new SpawnCommand(), "essentials.spawn");
-        register("setspawn", new SetSpawnCommand(), "essentials.setspawn");
+        register("spawn", new SpawnCommand(), "spawnog.spawn");
+        register("setspawn", new SetSpawnCommand(), "spawnog.setspawn");
 
-        getServer().getPluginManager().registerEvents(new SpawnListener(), this);
+        AutopsyMigrationStore migrationStore = new AutopsyMigrationStore(this);
+        loginMigrationService = new LoginMigrationService(this, migrationStore);
+        getServer().getPluginManager().registerEvents(new SpawnListener(this, loginMigrationService), this);
+
+        if (getConfig().getBoolean("flight.enabled", true)
+                && getServer().getPluginManager().isPluginEnabled("WorldGuard")
+                && getServer().getPluginManager().isPluginEnabled("WorldEdit"))
+        {
+
+            regionFlightService = new RegionFlightService(this, loginMigrationService);
+            getServer().getPluginManager().registerEvents(regionFlightService, this);
+            getCommand("fly").setExecutor(new ToggleRegionFlightCommand(regionFlightService));
+
+        } else if (getConfig().getBoolean("flight.enabled", true)) {
+
+            getLogger().warning("WorldGuard or WorldEdit is unavailable; regional flight management is disabled.");
+
+        }
+
+    }
+
+    @Override
+    public void onDisable() {
+
+        if (loginMigrationService != null)
+            loginMigrationService.close();
+        if (regionFlightService != null)
+            regionFlightService.close();
 
     }
 

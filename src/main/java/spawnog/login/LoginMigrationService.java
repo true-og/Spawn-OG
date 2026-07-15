@@ -1,0 +1,323 @@
+package spawnog.login;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
+import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
+import org.bukkit.GameMode;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.entity.Player;
+import org.bukkit.util.Vector;
+
+import spawnog.SpawnOG;
+
+public final class LoginMigrationService {
+
+    private static final List<String> DEFAULT_STAFF_PERMISSIONS = List.of("spawnog.login-migration.bypass",
+            "staffog.seebroadcast", "chat-og.staff", "sv.use");
+    private static final Set<String> DEFAULT_WORLDS = Set.of("world", "world_nether", "world_the_end");
+    private static final Set<Material> HAZARDOUS_BLOCKS = Set.of(Material.LAVA, Material.FIRE, Material.SOUL_FIRE,
+            Material.POWDER_SNOW, Material.CACTUS, Material.SWEET_BERRY_BUSH, Material.MAGMA_BLOCK, Material.CAMPFIRE,
+            Material.SOUL_CAMPFIRE, Material.WITHER_ROSE);
+
+    private final SpawnOG plugin;
+    private final AutopsyMigrationStore migrationStore;
+    private final MiniMessage miniMessage = MiniMessage.miniMessage();
+    private final Map<UUID, PendingLogin> pendingLogins = new HashMap<>();
+
+    public LoginMigrationService(SpawnOG plugin, AutopsyMigrationStore migrationStore) {
+
+        this.plugin = plugin;
+        this.migrationStore = migrationStore;
+
+    }
+
+    public boolean handleLogin(Player player, Location plannedDestination) {
+
+        if (!plugin.getConfig().getBoolean("login-safety.enabled", true))
+            return false;
+
+        boolean managedWorld = isManagedWorld(player);
+        GameMode originalGamemode = player.getGameMode();
+        boolean staff = isStaff(player);
+        boolean normalizeGamemode = managedWorld && !staff
+                && plugin.getConfig().getBoolean("login-safety.normalize-non-staff-gamemode", true)
+                && originalGamemode != GameMode.SURVIVAL;
+        boolean autopsyMigration = managedWorld && !staff && originalGamemode == GameMode.SPECTATOR
+                && plugin.getConfig().getBoolean("login-safety.autopsy-migration.enabled", true)
+                && !migrationStore.hasMigrated(player.getUniqueId());
+        boolean vulnerableAfterLogin = normalizeGamemode || originalGamemode == GameMode.SURVIVAL
+                || originalGamemode == GameMode.ADVENTURE;
+        boolean unsafe = vulnerableAfterLogin && isUnsafe(player.getLocation());
+
+        Location destination = plannedDestination;
+        if (destination == null && (autopsyMigration || unsafe))
+            destination = globalSpawn();
+
+        boolean teleportRequired = destination != null;
+        if (!teleportRequired && !normalizeGamemode)
+            return false;
+
+        if ((autopsyMigration || unsafe) && destination == null) {
+
+            protectAfterFailedRescue(player, originalGamemode, unsafe);
+            send(player, "locale.loginSafetyFailed",
+                    "<red>Your login location could not be made safe because the global spawn is not configured. Staff have been notified.</red>");
+            plugin.getLogger().severe("Unable to safely migrate " + player.getName()
+                    + " because spawns.global.location is not configured.");
+            return true;
+
+        }
+
+        beginTransaction(player, destination, originalGamemode, normalizeGamemode, autopsyMigration, unsafe);
+        return true;
+
+    }
+
+    public void cancel(Player player) {
+
+        PendingLogin pending = pendingLogins.remove(player.getUniqueId());
+        if (pending != null)
+            player.setInvulnerable(pending.originalInvulnerable());
+
+    }
+
+    public boolean isPending(Player player) {
+
+        return player != null && pendingLogins.containsKey(player.getUniqueId());
+
+    }
+
+    public void close() {
+
+        pendingLogins.forEach((playerId, pending) -> {
+
+            Player player = plugin.getServer().getPlayer(playerId);
+            if (player != null)
+                player.setInvulnerable(pending.originalInvulnerable());
+
+        });
+        pendingLogins.clear();
+
+    }
+
+    private void beginTransaction(Player player, Location destination, GameMode originalGamemode,
+            boolean normalizeGamemode, boolean autopsyMigration, boolean unsafe)
+    {
+
+        UUID playerId = player.getUniqueId();
+        if (pendingLogins.containsKey(playerId))
+            return;
+
+        PendingLogin pending = new PendingLogin(player.isInvulnerable(), player.getAllowFlight(), player.isFlying(),
+                originalGamemode, player.getLocation().clone(), normalizeGamemode, autopsyMigration, unsafe);
+        pendingLogins.put(playerId, pending);
+
+        player.setInvulnerable(true);
+        player.setFallDistance(0.0F);
+        player.setVelocity(new Vector());
+
+        if (destination == null) {
+
+            plugin.getServer().getScheduler().runTask(plugin, () -> complete(player, true, null));
+            return;
+
+        }
+
+        CompletableFuture<Boolean> teleport = player.teleportAsync(destination.clone());
+        teleport.whenComplete((success, error) -> {
+
+            if (!plugin.isEnabled())
+                return;
+            plugin.getServer().getScheduler().runTask(plugin,
+                    () -> complete(player, Boolean.TRUE.equals(success), error));
+
+        });
+
+    }
+
+    private void complete(Player player, boolean teleportSucceeded, Throwable teleportError) {
+
+        PendingLogin pending = pendingLogins.remove(player.getUniqueId());
+        if (pending == null)
+            return;
+
+        if (!player.isOnline()) {
+
+            player.setInvulnerable(pending.originalInvulnerable());
+            return;
+
+        }
+
+        if (!teleportSucceeded || teleportError != null || isUnsafe(player.getLocation())) {
+
+            protectAfterFailedRescue(player, pending.originalGamemode(), true);
+            player.setInvulnerable(pending.originalInvulnerable());
+            send(player, "locale.loginSafetyFailed",
+                    "<red>Your login safety migration could not finish. You were left in a non-damaging gamemode; please contact staff.</red>");
+            plugin.getLogger().severe("Login safety transaction failed for " + player.getName()
+                    + (teleportError == null ? "." : ": " + teleportError.getMessage()));
+            return;
+
+        }
+
+        if (pending.normalizeGamemode()) {
+
+            if (player.isFlying())
+                player.setFlying(false);
+            player.setFallDistance(0.0F);
+            player.setGameMode(GameMode.SURVIVAL);
+            if (player.getGameMode() != GameMode.SURVIVAL) {
+
+                player.setInvulnerable(pending.originalInvulnerable());
+                send(player, "locale.loginSafetyFailed",
+                        "<red>Another plugin prevented your safe switch to survival. Staff have been notified.</red>");
+                plugin.getLogger().severe(
+                        "Another plugin prevented Spawn-OG from normalizing " + player.getName() + " to survival.");
+                return;
+
+            }
+
+            if (plugin.getConfig().getBoolean("login-safety.remove-flight-on-normalize", true))
+                player.setAllowFlight(false);
+
+        }
+
+        if (pending.autopsyMigration()) {
+
+            boolean recorded = migrationStore.record(player.getUniqueId(), player.getName(), pending.originalGamemode(),
+                    pending.originalLocation());
+            if (!recorded) {
+
+                rollbackAutopsyCommit(player, pending);
+                player.setInvulnerable(pending.originalInvulnerable());
+                send(player, "locale.loginSafetyFailed",
+                        "<red>Your autopsy migration could not be recorded. You remain safely in spectator mode; please contact staff.</red>");
+                return;
+
+            }
+
+            Location from = pending.originalLocation();
+            send(player, "locale.autopsyMigration",
+                    "<gold>Your OG:SMP autopsy state was safely migrated from <red><x>, <y>, <z></red> in <world>. You were moved to spawn and returned to survival.</gold>",
+                    Placeholder.unparsed("x", String.valueOf(from.getBlockX())),
+                    Placeholder.unparsed("y", String.valueOf(from.getBlockY())),
+                    Placeholder.unparsed("z", String.valueOf(from.getBlockZ())),
+                    Placeholder.unparsed("world", from.getWorld() == null ? "unknown" : from.getWorld().getName()));
+
+        } else if (pending.normalizeGamemode()) {
+
+            send(player, "locale.gamemodeNormalized",
+                    "<gold>Your login gamemode was safely returned to survival.</gold>");
+
+        } else if (pending.unsafe()) {
+
+            Location from = pending.originalLocation();
+            send(player, "locale.unsafeLogin",
+                    "<gold>You logged in at an unsafe location (<red><x>, <y>, <z></red> in <world>) and were teleported to spawn.</gold>",
+                    Placeholder.unparsed("x", String.valueOf(from.getBlockX())),
+                    Placeholder.unparsed("y", String.valueOf(from.getBlockY())),
+                    Placeholder.unparsed("z", String.valueOf(from.getBlockZ())),
+                    Placeholder.unparsed("world", from.getWorld() == null ? "unknown" : from.getWorld().getName()));
+
+        }
+
+        player.setInvulnerable(pending.originalInvulnerable());
+
+    }
+
+    private void protectAfterFailedRescue(Player player, GameMode originalGamemode, boolean unsafe) {
+
+        if (unsafe && originalGamemode != GameMode.CREATIVE && originalGamemode != GameMode.SPECTATOR) {
+
+            player.setGameMode(GameMode.SPECTATOR);
+            player.setFallDistance(0.0F);
+
+        }
+
+    }
+
+    private void rollbackAutopsyCommit(Player player, PendingLogin pending) {
+
+        if (player.isFlying())
+            player.setFlying(false);
+        player.setGameMode(pending.originalGamemode());
+        player.setAllowFlight(pending.originalAllowFlight());
+        if (pending.originalFlying() && player.getAllowFlight())
+            player.setFlying(true);
+        player.setFallDistance(0.0F);
+
+    }
+
+    private boolean isManagedWorld(Player player) {
+
+        List<String> configuredWorlds = plugin.getConfig().getStringList("login-safety.worlds");
+        if (configuredWorlds.isEmpty())
+            return DEFAULT_WORLDS.contains(player.getWorld().getName());
+        return configuredWorlds.stream().anyMatch(world -> world.equalsIgnoreCase(player.getWorld().getName()));
+
+    }
+
+    private boolean isStaff(Player player) {
+
+        List<String> permissions = plugin.getConfig().getStringList("login-safety.staff-bypass-permissions");
+        if (permissions.isEmpty())
+            permissions = DEFAULT_STAFF_PERMISSIONS;
+        return permissions.stream().anyMatch(player::hasPermission);
+
+    }
+
+    private Location globalSpawn() {
+
+        Location spawn = plugin.getConfig().getLocation("spawns.global.location");
+        return spawn == null ? null : spawn.clone();
+
+    }
+
+    private boolean isUnsafe(Location location) {
+
+        if (location.getWorld() == null)
+            return true;
+        if (location.getY() <= location.getWorld().getMinHeight()
+                || location.getY() >= location.getWorld().getMaxHeight())
+            return true;
+        if (!location.getWorld().getWorldBorder().isInside(location))
+            return true;
+
+        Block feet = location.getBlock();
+        Block head = feet.getRelative(BlockFace.UP);
+        Block ground = feet.getRelative(BlockFace.DOWN);
+        if (feet.getType().isOccluding() || head.getType().isOccluding())
+            return true;
+        if (HAZARDOUS_BLOCKS.contains(feet.getType()) || HAZARDOUS_BLOCKS.contains(head.getType())
+                || HAZARDOUS_BLOCKS.contains(ground.getType()))
+            return true;
+        return ground.isEmpty();
+
+    }
+
+    private void send(Player player, String path, String fallback, TagResolver... placeholders) {
+
+        String message = plugin.getConfig().getString(path, fallback);
+        Component component = miniMessage.deserialize(message, placeholders);
+        player.sendMessage(component);
+
+    }
+
+    private record PendingLogin(boolean originalInvulnerable, boolean originalAllowFlight, boolean originalFlying,
+            GameMode originalGamemode, Location originalLocation, boolean normalizeGamemode, boolean autopsyMigration,
+            boolean unsafe)
+    {
+    }
+
+}

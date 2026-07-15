@@ -21,7 +21,7 @@ java {
 /* ----------------------------- Metadata ------------------------------ */
 group = "net.trueog.spawn-og" // Declare bundle identifier.
 
-version = "1.0" // Declare plugin version (will be in .jar).
+version = "1.1" // Declare plugin version (will be in .jar).
 
 val apiVersion = "1.19" // Declare minecraft server target version.
 
@@ -39,12 +39,15 @@ repositories {
     gradlePluginPortal() // Import the Gradle Plugin Portal Maven Repository.
     maven { url = uri("https://repo.purpurmc.org/snapshots") } // Import the PurpurMC Maven Repository.
     maven { url = uri("https://repo.codemc.io/repository/maven-public/") } // Import the CodeMC Maven Repository.
+    maven { url = uri("https://maven.enginehub.org/repo/") } // Import the EngineHub Maven Repository.
 }
 
 /* ---------------------- Java project deps ---------------------------- */
 dependencies {
     compileOnly("org.purpurmc.purpur:purpur-api:1.19.4-R0.1-SNAPSHOT") // Declare Purpur API version to be packaged.
     compileOnly("net.luckperms:api:5.4") // Import LuckPerms API.
+    compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.3.0-SNAPSHOT")
+    compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.8") { exclude(group = "com.sk89q.worldedit") }
 }
 
 /* ---------------------- Reproducible jars ---------------------------- */

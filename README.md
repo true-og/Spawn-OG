@@ -1,58 +1,64 @@
 # Spawn-OG
 
-**Spawn-OG** is a Minecraft server plugin that allows server administrators to set world spawn points and manage player teleportation to those spawns. It provides functionality similar to EssentialsXSpawn – such as setting and teleporting to spawn points, and first-join spawn control, with additional configuration options from TrueOG Network. Spawn-OG works in conjunction with the [Essentials-OG](https://github.com/true-og/Essentials-OG) fork of EssentialsX. It handles the spawn-related features originally handled by EssentialsSpawn. This is one small step towards a post-Essentials TrueOG Network.
+Spawn-OG owns safe player entry, spawn and respawn behavior, and TrueOG's
+WorldGuard-based regional flight policy. It replaces EssentialsXSpawn and the
+flight and gamemode management portions of legacy WGamemode-OG on Purpur 1.19.4.
 
-## Features
+## Login safety
 
-- **Set Spawn Points:**
-```/setspawn```
-- **Teleport to Spawn:**
-```/spawn```
-- **Teleport Others to Spawn:**
-```/spawn <player```
-- **Async teleportation:**
-Minimal impact on server performance
-- **Teleport delay:**
-5 seconds
-- **First Join Spawn (Newbie Spawn):**
-- **Respawn Handling:**
-By default, if `respawn-at-home` is set to false, players will respawn at the spawn point. If `respawn-at-home` is true, players will respawn at their bed or home location (if defined) instead of spawn. The plugin respects beds and Essentials homes according to this setting.
-- **Spawn-on-Join:**
-Optionally, the plugin can force players to go to spawn every time they log in, by enabling `spawn-on-join` in the config.
+1. Preserve the player's current invulnerability state and make them
+   invulnerable while repair is in progress.
+2. Load and teleport to the configured global spawn when relocation is needed.
+3. Change non-staff spectator, creative, or adventure players to survival.
+4. Successfully rescued autopsy players are told their original world and block coordinates in chat so they can identify the location they were browsing.
+
+By default, login normalization is limited to `world`, `world_nether`, and
+`world_the_end`. Add other survival worlds explicitly rather than applying the
+rule to minigame or build worlds accidentally.
+
+## Regional flight
+
+Inside a `fly` region, players with `spawnog.flight` can toggle flight using
+`/fly`. Inside a `nofly` region, flight is suspended unless the player has
+`spawnog.flight.bypass`. Previous flight permission is restored on region exit
+or disconnect, and fall damage caused by forced landing is cancelled once.
+
+## Regional item drops
+
+```text
+/rg flag -w world spawn item-drop deny
+```
+
+Repeat the above command with each additional world and region that should deny
+drops. Remove the explicit policy with `item-drop` and no value, or restore
+drops with `item-drop allow`. Staff bypass, when genuinely required, is the
+LuckPerms permission `worldguard.region.bypass.<world>`.
+
+This replaces WGamemode-OG's `stopItemDrop` behavior with an explicit region
+policy that applies consistently whether or not the player has toggled flight.
 
 ## Commands
 
-- **`/spawn`**
-Teleport yourself to the defined spawn location. If used by a player, it sends that player to the spawn (global or their group’s spawn):contentReference[oaicite:21]{index=21}. If used from console or by an admin with a target, see below.  
-- **`/spawn <player>`**
-Teleport the specified player to spawn. The target player will be sent to the spawn point, provided the command executor has permission to send others. The target will receive a message (e.g. “<*Player*> teleported you to spawn.”).  
-- **`/setspawn`**
-Set the spawn point for the current world/group to your current location. With no arguments, this sets the “default” global spawn point:contentReference[oaicite:22]{index=22}. This is typically the main spawn for your server (and is used for all players unless group-specific spawns are set).  
-- **`/setspawn <group>`**
-Set a spawn point for a specific group name. For example, `/setspawn newbie` will set the spawn location used for new players (if your config’s `newbies.spawnpoint` is “newbie”), or `/setspawn builders` could set a special spawn for the “builders” permission group.
+- `/spawn` — Teleport to the global or LuckPerms-group spawn after a five-second
+  warmup.
+- `/spawn <player>` — Teleport another player to their resolved spawn.
+- `/setspawn [group] [normalize-view] [normalize-position]` — Configure a spawn.
+- `/fly` — Toggle flight inside a configured `fly` region.
 
 ## Permissions
 
-- **`essentials.spawn`** – Allows use of the `/spawn` command to teleport oneself to spawn. *Default:* true.
-- **`essentials.spawn.others`** – Allows sending *other players* to spawn with `/spawn <player>`. *Default:* false.
-- **`essentials.setspawn`** – Allows use of `/setspawn` to define spawn points. *Default:* false.
-
-## Prerequisites
-
-[Essentials-OG](https://github.com/true-og/Essentials-OG)
+- `spawnog.spawn` — Use `/spawn`.
+- `spawnog.spawn.others` — Use `/spawn <player>`.
+- `spawnog.setspawn` — Configure spawns.
+- `spawnog.login-migration.bypass` — Explicitly exempt staff from login
+  migration and normalization.
+- `spawnog.flight` — Use regional `/fly`; granted by default.
+- `spawnog.flight.bypass` — Ignore `nofly` regions; not granted by default.
 
 ## Building
 
-Use the TrueOG Bootstrap to build automatically, or run:
+Use the TrueOG bootstrap, or run:
 
-```./gradlew clean build eclipse```
-
-## TODO:
-
-- Cancel teleport if a player is in combat
-
-- Cancel teleport if a player moves
-
-## Licese
-
-[MIT](https://raw.githubusercontent.com/true-og/Spawn-OG/refs/heads/main/LICENSE)
+```sh
+./gradlew clean build eclipse --warning-mode all
+```

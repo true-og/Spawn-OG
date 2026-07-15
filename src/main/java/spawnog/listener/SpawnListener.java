@@ -1,20 +1,26 @@
 package spawnog.listener;
 
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.minimessage.MiniMessage;
-import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Location;
-import org.bukkit.block.Block;
-import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
 import org.bukkit.event.*;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerKickEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import spawnog.SpawnOG;
+import spawnog.login.LoginMigrationService;
 
 public class SpawnListener implements Listener {
 
-    private final SpawnOG plugin = SpawnOG.getInstance();
+    private final SpawnOG plugin;
+    private final LoginMigrationService loginMigration;
+
+    public SpawnListener(SpawnOG plugin, LoginMigrationService loginMigration) {
+
+        this.plugin = plugin;
+        this.loginMigration = loginMigration;
+
+    }
 
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
@@ -23,15 +29,7 @@ public class SpawnListener implements Listener {
         boolean first = !p.hasPlayedBefore();
         boolean force = plugin.getConfig().getBoolean("spawn-on-join", false);
 
-        if (!first && !force) {
-
-            // Returning players keep their logout position; rescue them if it is unsafe.
-            rescueIfUnsafe(p);
-            return;
-
-        }
-
-        Location dest;
+        Location dest = null;
         if (first) {
 
             String nb = plugin.getConfig().getString("newbies.spawnpoint", "newbie").toLowerCase();
@@ -39,14 +37,28 @@ public class SpawnListener implements Listener {
             if (dest == null)
                 dest = plugin.getConfig().getLocation("spawns.global.location");
 
-        } else {
+        } else if (force) {
 
             dest = plugin.getConfig().getLocation("spawns.global.location");
 
         }
 
-        if (dest != null)
+        if (!loginMigration.handleLogin(p, dest) && dest != null)
             p.teleportAsync(dest.clone());
+
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent e) {
+
+        loginMigration.cancel(e.getPlayer());
+
+    }
+
+    @EventHandler
+    public void onKick(PlayerKickEvent e) {
+
+        loginMigration.cancel(e.getPlayer());
 
     }
 
@@ -59,11 +71,17 @@ public class SpawnListener implements Listener {
         if (atHome && (p.getBedSpawnLocation() != null))
             return;
 
-        if (atHome && plugin.getServer().getPluginManager().isPluginEnabled("Essentials")) {
+        String essentialsName = null;
+        if (plugin.getServer().getPluginManager().isPluginEnabled("Essentials-OG"))
+            essentialsName = "Essentials-OG";
+        else if (plugin.getServer().getPluginManager().isPluginEnabled("Essentials"))
+            essentialsName = "Essentials";
+
+        if (atHome && essentialsName != null) {
 
             try {
 
-                Object ess = plugin.getServer().getPluginManager().getPlugin("Essentials");
+                Object ess = plugin.getServer().getPluginManager().getPlugin(essentialsName);
                 Object user = ess.getClass().getMethod("getUser", Player.class).invoke(ess, p);
                 Location home = (Location) user.getClass().getMethod("getHome", String.class).invoke(user, "home");
                 if (home != null) {
@@ -82,48 +100,6 @@ public class SpawnListener implements Listener {
         Location def = plugin.getConfig().getLocation("spawns.global.location");
         if (def != null)
             e.setRespawnLocation(def.clone());
-
-    }
-
-    // Teleport the player to spawn and report their old coordinates when their
-    // login location is unsafe.
-    private void rescueIfUnsafe(Player p) {
-
-        Location from = p.getLocation();
-        if (!isUnsafe(from))
-            return;
-
-        Location spawn = plugin.getConfig().getLocation("spawns.global.location");
-        if (spawn == null)
-            return;
-
-        String raw = plugin.getConfig().getString("locale.unsafeLogin",
-                "<gold>You logged in at an unsafe location (<red><x>, <y>, <z></red> in <world>) and were teleported to spawn.</gold>");
-        Component msg = MiniMessage.miniMessage().deserialize(raw,
-                Placeholder.unparsed("x", String.valueOf(from.getBlockX())),
-                Placeholder.unparsed("y", String.valueOf(from.getBlockY())),
-                Placeholder.unparsed("z", String.valueOf(from.getBlockZ())),
-                Placeholder.unparsed("world", from.getWorld() != null ? from.getWorld().getName() : "unknown"));
-        p.sendMessage(msg);
-
-        p.teleportAsync(spawn.clone());
-
-    }
-
-    // Unsafe when an occluding block overlaps the player's body (suffocation) or
-    // there is nothing solid underfoot (fall).
-    private boolean isUnsafe(Location loc) {
-
-        Block feet = loc.getBlock();
-        Block head = feet.getRelative(BlockFace.UP);
-        Block ground = feet.getRelative(BlockFace.DOWN);
-
-        // Suffocation: head or feet inside a full solid block.
-        if (feet.getType().isOccluding() || head.getType().isOccluding())
-            return true;
-
-        // Air underfoot: nothing to stand on.
-        return ground.isEmpty();
 
     }
 

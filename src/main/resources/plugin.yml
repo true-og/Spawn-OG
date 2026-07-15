@@ -1,28 +1,59 @@
 name: Spawn-OG
-description: A Minecraft Plugin simplifies teleporting to the spawn location.
-description: A drop-in replacement for EssentialsSpawn
+description: Safe player entry, spawn management, and WorldGuard regional flight for TrueOG.
 version: '${version}'
 api-version: '${apiVersion}'
 authors: [ kasumabalidps, NotAlexNoyle ]
 website: https://github.com/true-og/Spawn-OG
 main: spawnog.SpawnOG
-api-version: 1.19
+softdepend: [LuckPerms, WorldEdit, WorldGuard]
+loadbefore: [Essentials, Essentials-OG]
 commands:
   spawn:
     description: Teleport yourself (or another player) to the server spawn
     usage: /spawn [player]
-    permission: spawnog.teleport
+    permission: spawnog.spawn
   setspawn:
     description: Set or clear the server spawn point
     usage: /setspawn [normalize-view] [normalize-position] | /setspawn unset
-    permission: spawnog.admin
+    permission: spawnog.setspawn
+  fly:
+    description: Toggle flight inside a WorldGuard region configured to allow it
+    usage: /fly
+    permission: spawnog.flight
 permissions:
-  spawnog.teleport:
+  spawnog.spawn:
     description: Use /spawn on yourself
     default: true
-  spawn.others:
+  spawnog.spawn.others:
     description: Use /spawn <player>
-    default: op
-  spawnog.admin:
+    default: false
+  spawnog.setspawn:
     description: Use /setspawn
-    default: op
+    default: false
+  spawnog.login-migration.bypass:
+    description: Exempt a staff member from autopsy migration and login gamemode normalization
+    default: false
+  spawnog.flight:
+    description: Use /fly inside regions configured to allow flight
+    default: true
+  spawnog.flight.bypass:
+    description: Exempt a player from regional no-flight rules
+    default: false
+  spawnog.flight.*:
+    description: Grant regional flight use and bypass
+    default: false
+    children:
+      spawnog.flight: true
+      spawnog.flight.bypass: true
+  wgamemode.fly:
+    description: Legacy alias for spawnog.flight
+    default: true
+  wgamemode.fly.bypass:
+    description: Legacy alias for spawnog.flight.bypass
+    default: false
+  wgamemode.*:
+    description: Legacy aggregate permission for WGamemode-OG compatibility
+    default: false
+    children:
+      wgamemode.fly: true
+      wgamemode.fly.bypass: true

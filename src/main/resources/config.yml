@@ -1,8 +1,35 @@
-spawn-on-join: default
+spawn-on-join: false
+respawn-at-home: true
 newbies:
   spawnpoint: newbie
+login-safety:
+  enabled: true
+  # Only these SMP dimensions are normalized. Add other survival worlds explicitly.
+  worlds:
+    - world
+    - world_nether
+    - world_the_end
+  autopsy-migration:
+    enabled: true
+  normalize-non-staff-gamemode: true
+  remove-flight-on-normalize: true
+  # LuckPerms-backed permissions. Matching any entry exempts a player from
+  # spectator migration and creative/adventure-to-survival normalization.
+  staff-bypass-permissions:
+    - spawnog.login-migration.bypass
+    - staffog.seebroadcast
+    - chat-og.staff
+    - sv.use
+flight:
+  enabled: true
+  regions:
+    spawn: fly
+    warzone: nofly
 locale:
   unsafeLogin: "<gold>You logged in at an unsafe location (<red><x>, <y>, <z></red> in <world>) and were teleported to spawn.</gold>"
+  autopsyMigration: "<gold>Your OG:SMP autopsy state was safely migrated from <red><x>, <y>, <z></red> in <world>. You were moved to spawn and returned to survival.</gold>"
+  gamemodeNormalized: "<gold>Your login gamemode was safely returned to survival.</gold>"
+  loginSafetyFailed: "<red>Your login safety migration could not finish safely. Please contact staff.</red>"
 spawns:
   global:
     location:

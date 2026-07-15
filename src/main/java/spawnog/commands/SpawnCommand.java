@@ -51,7 +51,7 @@ public class SpawnCommand implements CommandExecutor, TabCompleter {
 
         }
 
-        if (!sender.hasPermission("essentials.spawn.others")) {
+        if (!sender.hasPermission("spawnog.spawn.others")) {
 
             sender.sendMessage(cfg.getString("locale.missingPermission", "You are lacking the required permissions."));
             return true;
@@ -84,7 +84,7 @@ public class SpawnCommand implements CommandExecutor, TabCompleter {
             @NotNull String lbl, @NotNull String[] args)
     {
 
-        if (args.length == 1 && sender.hasPermission("essentials.spawn.others")) {
+        if (args.length == 1 && sender.hasPermission("spawnog.spawn.others")) {
 
             return Bukkit.getOnlinePlayers().stream().map(Player::getName)
                     .filter(n -> n.toLowerCase().startsWith(args[0].toLowerCase())).collect(Collectors.toList());
