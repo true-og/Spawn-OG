@@ -1,11 +1,13 @@
 package spawnog.login;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -34,6 +36,7 @@ public final class LoginMigrationService {
     private final AutopsyMigrationStore migrationStore;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final Map<UUID, PendingLogin> pendingLogins = new HashMap<>();
+    private final List<Consumer<Player>> completionListeners = new ArrayList<>();
 
     public LoginMigrationService(SpawnOG plugin, AutopsyMigrationStore migrationStore) {
 
@@ -98,6 +101,12 @@ public final class LoginMigrationService {
 
     }
 
+    public void addCompletionListener(Consumer<Player> listener) {
+
+        completionListeners.add(listener);
+
+    }
+
     public void close() {
 
         pendingLogins.forEach((playerId, pending) -> {
@@ -151,6 +160,22 @@ public final class LoginMigrationService {
         PendingLogin pending = pendingLogins.remove(player.getUniqueId());
         if (pending == null)
             return;
+
+        try {
+
+            finishTransaction(player, pending, teleportSucceeded, teleportError);
+
+        } finally {
+
+            completionListeners.forEach(listener -> listener.accept(player));
+
+        }
+
+    }
+
+    private void finishTransaction(Player player, PendingLogin pending, boolean teleportSucceeded,
+            Throwable teleportError)
+    {
 
         if (!player.isOnline()) {
 

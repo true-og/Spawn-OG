@@ -61,6 +61,7 @@ public final class RegionFlightService implements Listener {
 
         this.plugin = plugin;
         this.loginMigrationService = loginMigrationService;
+        loginMigrationService.addCompletionListener(this::scheduleRefresh);
         loadRules();
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::spawnFlightParticles, PARTICLE_INITIAL_DELAY_TICKS,
                 PARTICLE_PERIOD_TICKS);
@@ -128,12 +129,12 @@ public final class RegionFlightService implements Listener {
 
         if (player == null || !player.isOnline())
             return;
-        if (loginMigrationService.isPending(player)) {
-
-            scheduleRefresh(player);
+        // While a login migration is in flight, do not reschedule: the completion
+        // listener registered in the constructor refreshes once it resolves.
+        // Re-polling here previously spun the scheduler within a single tick and
+        // froze the server, because the migration could only resolve on a later tick.
+        if (loginMigrationService.isPending(player))
             return;
-
-        }
 
         UUID playerId = player.getUniqueId();
         RegionRule rule = currentRule(player);
@@ -407,15 +408,21 @@ public final class RegionFlightService implements Listener {
 
     private void scheduleRefresh(Player player) {
 
+        if (!plugin.isEnabled())
+            return;
+
         UUID playerId = player.getUniqueId();
         if (!scheduledRefreshes.add(playerId))
             return;
-        plugin.getServer().getScheduler().runTask(plugin, () -> {
+        // Paper's scheduler executes zero-delay tasks scheduled from within a task
+        // in the same tick, so a one-tick delay is required to guarantee the
+        // current tick always finishes before the refresh runs.
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
 
             scheduledRefreshes.remove(playerId);
             refresh(player);
 
-        });
+        }, 1L);
 
     }
 
