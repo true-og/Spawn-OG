@@ -6,15 +6,44 @@ flight and gamemode management portions of legacy WGamemode-OG on Purpur 1.19.4.
 
 ## Login safety
 
-1. Preserve the player's current invulnerability state and make them
-   invulnerable while repair is in progress.
-2. Load and teleport to the configured global spawn when relocation is needed.
-3. Change non-staff spectator, creative, or adventure players to survival.
-4. Successfully rescued autopsy players are told their original world and block coordinates in chat so they can identify the location they were browsing.
+1. Make the player invulnerable while repair is in progress, restoring their own
+   state afterwards.
+2. Teleport to the global spawn when relocation is needed.
+3. Return unsanctioned spectator, creative, and adventure logins to survival.
+4. Tell rescued players the world and block coordinates they came from.
 
-By default, login normalization is limited to `world`, `world_nether`, and
-`world_the_end`. Add other survival worlds explicitly rather than applying the
-rule to minigame or build worlds accidentally.
+Limited to `world`, `world_nether`, and `world_the_end`. Add other survival
+worlds explicitly, so minigame and build worlds are not caught by accident.
+
+### Who may log in outside survival
+
+Non-survival logins become survival unless the player may use that gamemode
+where they logged in. GameModeInventories-OG owns that rule; Spawn-OG asks its
+`GameModePolicy` rather than keeping a second copy. There is no bypass.
+
+Its rules: creative needs `gamemodeinventories.anywhere` or a creative region;
+spectator needs `gamemodeinventories.spectator` or `noclip.use` while
+`restrict_spectator` is on; adventure is never granted.
+
+Without GameModeInventories-OG, Spawn-OG falls back to
+`login-safety.gamemode-exemption-permissions` and `login-safety.creative-regions`,
+which mirror the same rules. A creative region is a WorldGuard region matched by
+id, not a flag; with no WorldGuard only `gamemodeinventories.anywhere` exempts
+anyone.
+
+### What counts as unsafe
+
+Water, tall grass, slabs, stairs, and carpet are ordinary survival play and are
+left alone. Only these are relocated: inside a full solid block, inside or on
+top of a damaging block, in or above lava, above a drop longer than five blocks
+with no water to break it, over the void, outside the world border, or outside
+the build limits.
+
+### Returning to an unsafe location
+
+`/spawnback` warns why the position was flagged; `/spawnback confirm` within
+thirty seconds sends the player back at their own risk. One shot per migration,
+stored in `return-locations.yml`.
 
 ## Regional flight
 
@@ -40,9 +69,11 @@ policy that applies consistently whether or not the player has toggled flight.
 ## Commands
 
 - `/spawn` — Teleport to the global or LuckPerms-group spawn after a five-second
-  warmup.
+  warmup. Moving cancels it; damage does not.
 - `/spawn <player>` — Teleport another player to their resolved spawn.
 - `/setspawn [group] [normalize-view] [normalize-position]` — Configure a spawn.
+- `/spawnback [confirm]` — Return to where a login safety migration moved you
+  from.
 - `/fly` — Toggle flight inside a configured `fly` region.
 
 ## Permissions
@@ -50,12 +81,17 @@ policy that applies consistently whether or not the player has toggled flight.
 - `spawnog.spawn` — Use `/spawn`.
 - `spawnog.spawn.others` — Use `/spawn <player>`.
 - `spawnog.setspawn` — Configure spawns.
-- `spawnog.login-migration.bypass` — Explicitly exempt staff from login
-  migration and normalization.
+- `spawnog.spawnback` — Use `/spawnback`; granted by default.
+- `spawnog.login-migration.bypass` — Exempt staff from autopsy migration only.
 - `spawnog.flight` — Use regional `/fly`; granted by default.
 - `spawnog.flight.bypass` — Ignore `nofly` regions; not granted by default.
 
 ## Building
+
+GameModeInventories-OG is a submodule under `libs/`, compiled from source and
+never bundled. `bootstrap.sh` fetches it, and `settings.gradle.kts` runs that on
+every configure. Take a newer version with
+`git submodule update --remote libs/GameModeInventories-OG`.
 
 Use the TrueOG bootstrap, or run:
 

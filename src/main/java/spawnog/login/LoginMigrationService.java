@@ -15,9 +15,6 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.block.Block;
-import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
@@ -28,20 +25,24 @@ public final class LoginMigrationService {
     private static final List<String> DEFAULT_STAFF_PERMISSIONS = List.of("spawnog.login-migration.bypass",
             "staffog.seebroadcast", "chat-og.staff", "sv.use");
     private static final Set<String> DEFAULT_WORLDS = Set.of("world", "world_nether", "world_the_end");
-    private static final Set<Material> HAZARDOUS_BLOCKS = Set.of(Material.LAVA, Material.FIRE, Material.SOUL_FIRE,
-            Material.POWDER_SNOW, Material.CACTUS, Material.SWEET_BERRY_BUSH, Material.MAGMA_BLOCK, Material.CAMPFIRE,
-            Material.SOUL_CAMPFIRE, Material.WITHER_ROSE);
+    private static final String AUTOPSY_REASON = "you were left in spectator mode by the OG:SMP autopsy";
 
     private final SpawnOG plugin;
     private final AutopsyMigrationStore migrationStore;
+    private final ReturnLocationStore returnLocationStore;
+    private final GamemodePolicy gamemodePolicy;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final Map<UUID, PendingLogin> pendingLogins = new HashMap<>();
     private final List<Consumer<Player>> completionListeners = new ArrayList<>();
 
-    public LoginMigrationService(SpawnOG plugin, AutopsyMigrationStore migrationStore) {
+    public LoginMigrationService(SpawnOG plugin, AutopsyMigrationStore migrationStore,
+            ReturnLocationStore returnLocationStore, GamemodePolicy gamemodePolicy)
+    {
 
         this.plugin = plugin;
         this.migrationStore = migrationStore;
+        this.returnLocationStore = returnLocationStore;
+        this.gamemodePolicy = gamemodePolicy;
 
     }
 
@@ -53,15 +54,20 @@ public final class LoginMigrationService {
         boolean managedWorld = isManagedWorld(player);
         GameMode originalGamemode = player.getGameMode();
         boolean staff = isStaff(player);
-        boolean normalizeGamemode = managedWorld && !staff
-                && plugin.getConfig().getBoolean("login-safety.normalize-non-staff-gamemode", true)
-                && originalGamemode != GameMode.SURVIVAL;
-        boolean autopsyMigration = managedWorld && !staff && originalGamemode == GameMode.SPECTATOR
+        // Any non-survival login is normalized unless the player is entitled to
+        // that gamemode where they logged in; being staff is not enough on its own.
+        boolean mayKeepGamemode = gamemodePolicy.mayUse(player, originalGamemode);
+        boolean normalizeGamemode = managedWorld && !mayKeepGamemode
+                && plugin.getConfig().getBoolean("login-safety.normalize-non-staff-gamemode", true);
+        // A sanctioned spectator is working, not an abandoned autopsy state.
+        boolean autopsyMigration = managedWorld && !staff && !mayKeepGamemode && originalGamemode == GameMode.SPECTATOR
                 && plugin.getConfig().getBoolean("login-safety.autopsy-migration.enabled", true)
                 && !migrationStore.hasMigrated(player.getUniqueId());
         boolean vulnerableAfterLogin = normalizeGamemode || originalGamemode == GameMode.SURVIVAL
                 || originalGamemode == GameMode.ADVENTURE;
-        boolean unsafe = vulnerableAfterLogin && isUnsafe(player.getLocation());
+        LocationSafety.Issue issue = vulnerableAfterLogin ? LocationSafety.check(player.getLocation())
+                : LocationSafety.Issue.NONE;
+        boolean unsafe = issue.unsafe();
 
         Location destination = plannedDestination;
         if (destination == null && (autopsyMigration || unsafe))
@@ -82,7 +88,7 @@ public final class LoginMigrationService {
 
         }
 
-        beginTransaction(player, destination, originalGamemode, normalizeGamemode, autopsyMigration, unsafe);
+        beginTransaction(player, destination, originalGamemode, normalizeGamemode, autopsyMigration, issue);
         return true;
 
     }
@@ -121,7 +127,7 @@ public final class LoginMigrationService {
     }
 
     private void beginTransaction(Player player, Location destination, GameMode originalGamemode,
-            boolean normalizeGamemode, boolean autopsyMigration, boolean unsafe)
+            boolean normalizeGamemode, boolean autopsyMigration, LocationSafety.Issue issue)
     {
 
         UUID playerId = player.getUniqueId();
@@ -129,7 +135,7 @@ public final class LoginMigrationService {
             return;
 
         PendingLogin pending = new PendingLogin(player.isInvulnerable(), player.getAllowFlight(), player.isFlying(),
-                originalGamemode, player.getLocation().clone(), normalizeGamemode, autopsyMigration, unsafe);
+                originalGamemode, player.getLocation().clone(), normalizeGamemode, autopsyMigration, issue);
         pendingLogins.put(playerId, pending);
 
         player.setInvulnerable(true);
@@ -239,6 +245,7 @@ public final class LoginMigrationService {
                     Placeholder.unparsed("y", String.valueOf(from.getBlockY())),
                     Placeholder.unparsed("z", String.valueOf(from.getBlockZ())),
                     Placeholder.unparsed("world", from.getWorld() == null ? "unknown" : from.getWorld().getName()));
+            offerReturn(player, pending);
 
         } else if (pending.normalizeGamemode()) {
 
@@ -254,10 +261,22 @@ public final class LoginMigrationService {
                     Placeholder.unparsed("y", String.valueOf(from.getBlockY())),
                     Placeholder.unparsed("z", String.valueOf(from.getBlockZ())),
                     Placeholder.unparsed("world", from.getWorld() == null ? "unknown" : from.getWorld().getName()));
+            offerReturn(player, pending);
 
         }
 
         player.setInvulnerable(pending.originalInvulnerable());
+
+    }
+
+    private void offerReturn(Player player, PendingLogin pending) {
+
+        String reason = pending.autopsyMigration() ? AUTOPSY_REASON : pending.safetyIssue().description();
+        if (!returnLocationStore.record(player.getUniqueId(), player.getName(), pending.originalLocation(), reason))
+            return;
+
+        send(player, "locale.returnAvailable",
+                "<gold>Run <red>/spawnback</red> if you want to go back there anyway.</gold>");
 
     }
 
@@ -311,23 +330,7 @@ public final class LoginMigrationService {
 
     private boolean isUnsafe(Location location) {
 
-        if (location.getWorld() == null)
-            return true;
-        if (location.getY() <= location.getWorld().getMinHeight()
-                || location.getY() >= location.getWorld().getMaxHeight())
-            return true;
-        if (!location.getWorld().getWorldBorder().isInside(location))
-            return true;
-
-        Block feet = location.getBlock();
-        Block head = feet.getRelative(BlockFace.UP);
-        Block ground = feet.getRelative(BlockFace.DOWN);
-        if (feet.getType().isOccluding() || head.getType().isOccluding())
-            return true;
-        if (HAZARDOUS_BLOCKS.contains(feet.getType()) || HAZARDOUS_BLOCKS.contains(head.getType())
-                || HAZARDOUS_BLOCKS.contains(ground.getType()))
-            return true;
-        return ground.isEmpty();
+        return LocationSafety.isUnsafe(location);
 
     }
 
@@ -341,8 +344,15 @@ public final class LoginMigrationService {
 
     private record PendingLogin(boolean originalInvulnerable, boolean originalAllowFlight, boolean originalFlying,
             GameMode originalGamemode, Location originalLocation, boolean normalizeGamemode, boolean autopsyMigration,
-            boolean unsafe)
+            LocationSafety.Issue safetyIssue)
     {
+
+        boolean unsafe() {
+
+            return safetyIssue.unsafe();
+
+        }
+
     }
 
 }

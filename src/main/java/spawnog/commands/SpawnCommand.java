@@ -2,8 +2,6 @@ package spawnog.commands;
 
 import java.util.*;
 import java.util.stream.Collectors;
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.luckperms.api.LuckPerms;
 import net.luckperms.api.model.user.User;
 import org.bukkit.Bukkit;
@@ -14,12 +12,19 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import spawnog.SpawnOG;
+import spawnog.teleport.SpawnWarmupService;
 
 public class SpawnCommand implements CommandExecutor, TabCompleter {
 
     private final SpawnOG plugin = SpawnOG.getInstance();
     private final FileConfiguration cfg = plugin.getConfig();
-    private final MiniMessage mm = MiniMessage.miniMessage();
+    private final SpawnWarmupService warmupService;
+
+    public SpawnCommand(SpawnWarmupService warmupService) {
+
+        this.warmupService = warmupService;
+
+    }
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command cmd, @NotNull String lbl,
@@ -97,16 +102,7 @@ public class SpawnCommand implements CommandExecutor, TabCompleter {
 
     private void scheduleTeleport(Player player, Location dest) {
 
-        String raw = cfg.getString("locale.spawnWarmup",
-                "<gold>Teleporting to spawn in <red>5 seconds...</red></gold>");
-        Component msg = mm.deserialize(raw);
-        player.sendMessage(msg);
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-
-            if (player.isOnline())
-                player.teleportAsync(dest);
-
-        }, 20L * 5);
+        warmupService.schedule(player, dest);
 
     }
 

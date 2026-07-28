@@ -48,6 +48,9 @@ dependencies {
     compileOnly("net.luckperms:api:5.4") // Import LuckPerms API.
     compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.3.0-SNAPSHOT")
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.8") { exclude(group = "com.sk89q.worldedit") }
+    compileOnlyApi(
+        project(":libs:GameModeInventories-OG")
+    ) // Import GameModeInventories-OG gamemode policy (from source).
 }
 
 /* ---------------------- Reproducible jars ---------------------------- */

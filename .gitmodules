@@ -1,0 +1,3 @@
+[submodule "libs/GameModeInventories-OG"]
+	path = libs/GameModeInventories-OG
+	url = https://github.com/true-og/GameModeInventories-OG

@@ -11,10 +11,28 @@ login-safety:
     - world_the_end
   autopsy-migration:
     enabled: true
+  # Return every non-survival login to survival unless the player is exempt below.
   normalize-non-staff-gamemode: true
   remove-flight-on-normalize: true
+  # Fallback rules, used only when GameModeInventories-OG is absent: it is the
+  # authority on gamemodes and Spawn-OG asks it first. Holding one of these keeps
+  # a creative or spectator login, and only inside the creative regions below (or
+  # with gamemodeinventories.anywhere). Adventure is never kept.
+  gamemode-exemption-permissions:
+    creative:
+      - noclip.use
+      - gamemodeinventories.toggle
+      - gamemodeinventories.anywhere
+    spectator:
+      - noclip.use
+      - gamemodeinventories.spectator
+  # Also fallback only. With GameModeInventories-OG loaded, its creative_regions
+  # list is what counts.
+  creative-regions:
+    - spawn
   # LuckPerms-backed permissions. Matching any entry exempts a player from
-  # spectator migration and creative/adventure-to-survival normalization.
+  # autopsy migration, so a staff spectator is never recorded as an OG:SMP
+  # autopsy. Gamemode normalization is governed by the exemptions above.
   staff-bypass-permissions:
     - spawnog.login-migration.bypass
     - staffog.seebroadcast
@@ -26,10 +44,22 @@ flight:
     spawn: fly
     warzone: nofly
 locale:
+  # <seconds> is replaced with the teleport warmup length.
+  spawnWarmup: "<gold>Teleporting to spawn in <red><seconds> seconds...</red></gold>"
+  # Movement cancels the warmup. Taking damage does not.
+  spawnCancelled: "<red>Teleport to spawn cancelled because you moved.</red>"
   unsafeLogin: "<gold>You logged in at an unsafe location (<red><x>, <y>, <z></red> in <world>) and were teleported to spawn.</gold>"
   autopsyMigration: "<gold>Your OG:SMP autopsy state was safely migrated from <red><x>, <y>, <z></red> in <world>. You were moved to spawn and returned to survival.</gold>"
   gamemodeNormalized: "<gold>Your login gamemode was safely returned to survival.</gold>"
   loginSafetyFailed: "<red>Your login safety migration could not finish safely. Please contact staff.</red>"
+  returnAvailable: "<gold>Run <red>/spawnback</red> if you want to go back there anyway.</gold>"
+  # <reason> explains why the location was flagged. <seconds> is the confirmation window.
+  returnWarning: "<gold>You were moved from <red><x>, <y>, <z></red> in <world> because <red><reason></red>. Run <red>/spawnback confirm</red> within <seconds> seconds to go back anyway; you may take damage or die.</gold>"
+  returnConfirmed: "<gold>Returning you to <red><x>, <y>, <z></red> in <world>. Good luck.</gold>"
+  returnNone: "<red>You have no location to return to.</red>"
+  returnWorldMissing: "<red>The world you were in (<world>) is not loaded, so you cannot return there.</red>"
+  returnBusy: "<red>Your login is still being made safe. Try again in a few seconds.</red>"
+  returnFailed: "<red>Your return teleport failed.</red>"
 spawns:
   global:
     location:
