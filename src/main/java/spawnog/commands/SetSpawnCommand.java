@@ -9,11 +9,20 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import spawnog.SpawnOG;
+import spawnog.integration.MyWorldsSpawnBridge;
 
 public class SetSpawnCommand implements CommandExecutor, TabCompleter {
 
     private final FileConfiguration cfg = SpawnOG.getInstance().getConfig();
     private static final Set<String> FLAGS = Set.of("normalize-view", "normalize-position", "unset");
+
+    private final MyWorldsSpawnBridge myWorldsSpawnBridge;
+
+    public SetSpawnCommand(MyWorldsSpawnBridge myWorldsSpawnBridge) {
+
+        this.myWorldsSpawnBridge = myWorldsSpawnBridge;
+
+    }
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command cmd, @NotNull String lbl,
@@ -77,6 +86,11 @@ public class SetSpawnCommand implements CommandExecutor, TabCompleter {
 
         cfg.set(path, l);
         SpawnOG.getInstance().saveConfig();
+
+        // Only the global spawn maps onto a world spawn point.
+        if (group == null && myWorldsSpawnBridge != null)
+            myWorldsSpawnBridge.adopt();
+
         p.sendMessage(cfg.getString("locale.spawnSet", "Spawn location updated."));
         return true;
 

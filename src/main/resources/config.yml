@@ -1,4 +1,5 @@
 spawn-on-join: false
+myworlds-spawn-sync: true # Push the global spawn into MyWorlds so world spawn matches /setspawn.
 respawn-at-home: true
 newbies:
   spawnpoint: newbie

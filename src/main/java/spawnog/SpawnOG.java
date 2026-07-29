@@ -10,6 +10,7 @@ import spawnog.commands.SpawnBackCommand;
 import spawnog.commands.SpawnCommand;
 import spawnog.flight.RegionFlightService;
 import spawnog.flight.ToggleRegionFlightCommand;
+import spawnog.integration.MyWorldsSpawnBridge;
 import spawnog.login.AutopsyMigrationStore;
 import spawnog.login.GameModeInventoriesAuthority;
 import spawnog.login.GamemodePolicy;
@@ -29,6 +30,7 @@ public final class SpawnOG extends JavaPlugin {
     @Getter
     private LuckPerms luckPerms;
 
+    private MyWorldsSpawnBridge myWorldsSpawnBridge;
     private LoginMigrationService loginMigrationService;
     private RegionFlightService regionFlightService;
     private SpawnWarmupService spawnWarmupService;
@@ -46,8 +48,14 @@ public final class SpawnOG extends JavaPlugin {
         spawnWarmupService = new SpawnWarmupService(this);
         getServer().getPluginManager().registerEvents(spawnWarmupService, this);
 
+        myWorldsSpawnBridge = new MyWorldsSpawnBridge(this);
+        getServer().getPluginManager().registerEvents(myWorldsSpawnBridge, this);
+        // Deferred a tick so MyWorlds has finished loading its worlds and stamping
+        // its own spawn points before Spawn-OG overrides them.
+        getServer().getScheduler().runTask(this, myWorldsSpawnBridge::adopt);
+
         register("spawn", new SpawnCommand(spawnWarmupService), "spawnog.spawn");
-        register("setspawn", new SetSpawnCommand(), "spawnog.setspawn");
+        register("setspawn", new SetSpawnCommand(myWorldsSpawnBridge), "spawnog.setspawn");
 
         AutopsyMigrationStore migrationStore = new AutopsyMigrationStore(this);
         ReturnLocationStore returnLocationStore = new ReturnLocationStore(this);

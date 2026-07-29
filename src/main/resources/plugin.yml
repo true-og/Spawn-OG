@@ -5,7 +5,7 @@ api-version: '${apiVersion}'
 authors: [ kasumabalidps, NotAlexNoyle ]
 website: https://github.com/true-og/Spawn-OG
 main: spawnog.SpawnOG
-softdepend: [LuckPerms, WorldEdit, WorldGuard, GameModeInventories-OG]
+softdepend: [LuckPerms, WorldEdit, WorldGuard, GameModeInventories-OG, MyWorlds, My_Worlds]
 loadbefore: [Essentials, Essentials-OG]
 commands:
   spawn:
