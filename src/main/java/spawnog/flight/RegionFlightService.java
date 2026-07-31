@@ -125,6 +125,44 @@ public final class RegionFlightService implements Listener {
 
     }
 
+    // Puts a player back into the air after a plugin-driven teleport when they
+    // were flying beforehand. The teleport's region refresh has already run by
+    // the time this is called, so re-enabling here is not overwritten. Refuses
+    // when the player lacks flight permission or the destination forbids flight.
+    public boolean resumeFlight(Player player) {
+
+        if (player == null || !player.isOnline())
+            return false;
+
+        RegionRule rule = currentRule(player);
+        if (rule != null && rule.kind() == RuleKind.NOFLY && !hasBypass(player))
+            return false;
+
+        // Flight already allowed by another authority (creative, bypass, an
+        // active override): only the airborne flag needs restoring.
+        if (player.getAllowFlight()) {
+
+            player.setFlying(true);
+            return true;
+
+        }
+
+        if (!(player.hasPermission(FLIGHT_PERMISSION) || player.hasPermission(LEGACY_FLIGHT_PERMISSION)))
+            return false;
+
+        // Inside a fly region, go through the toggle so reconciliation keeps the
+        // override; elsewhere the raw ability is enough, since refresh only acts
+        // where rules or overrides exist.
+        if (rule != null && rule.kind() == RuleKind.FLY)
+            toggleFlight(player);
+        else
+            player.setAllowFlight(true);
+
+        player.setFlying(true);
+        return true;
+
+    }
+
     public void refresh(Player player) {
 
         if (player == null || !player.isOnline())

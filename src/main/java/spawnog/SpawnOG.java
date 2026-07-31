@@ -64,10 +64,6 @@ public final class SpawnOG extends JavaPlugin {
         loginMigrationService = new LoginMigrationService(this, migrationStore, returnLocationStore, gamemodePolicy);
         getServer().getPluginManager().registerEvents(new SpawnListener(this, loginMigrationService), this);
 
-        SpawnBackCommand spawnBackCommand = new SpawnBackCommand(this, returnLocationStore, loginMigrationService);
-        register("spawnback", spawnBackCommand, "spawnog.spawnback");
-        getServer().getPluginManager().registerEvents(spawnBackCommand, this);
-
         if (getConfig().getBoolean("flight.enabled", true)
                 && getServer().getPluginManager().isPluginEnabled("WorldGuard")
                 && getServer().getPluginManager().isPluginEnabled("WorldEdit"))
@@ -82,6 +78,13 @@ public final class SpawnOG extends JavaPlugin {
             getLogger().warning("WorldGuard or WorldEdit is unavailable; regional flight management is disabled.");
 
         }
+
+        // Constructed after the flight service so /spawnback can hand players
+        // their wings back once the return teleport lands.
+        SpawnBackCommand spawnBackCommand = new SpawnBackCommand(this, returnLocationStore, loginMigrationService,
+                regionFlightService);
+        register("spawnback", spawnBackCommand, "spawnog.spawnback");
+        getServer().getPluginManager().registerEvents(spawnBackCommand, this);
 
     }
 

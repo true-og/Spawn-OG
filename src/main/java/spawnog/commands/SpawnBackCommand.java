@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import spawnog.SpawnOG;
+import spawnog.flight.RegionFlightService;
 import spawnog.login.LoginMigrationService;
 import spawnog.login.ReturnLocationStore;
 import spawnog.login.ReturnLocationStore.ReturnPoint;
@@ -36,16 +37,19 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
     private final SpawnOG plugin;
     private final ReturnLocationStore returnLocationStore;
     private final LoginMigrationService loginMigrationService;
+    // Null when regional flight management is disabled or WorldGuard is absent.
+    private final RegionFlightService regionFlightService;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final Map<UUID, Long> pendingConfirmations = new HashMap<>();
 
     public SpawnBackCommand(SpawnOG plugin, ReturnLocationStore returnLocationStore,
-            LoginMigrationService loginMigrationService)
+            LoginMigrationService loginMigrationService, RegionFlightService regionFlightService)
     {
 
         this.plugin = plugin;
         this.returnLocationStore = returnLocationStore;
         this.loginMigrationService = loginMigrationService;
+        this.regionFlightService = regionFlightService;
 
     }
 
@@ -95,7 +99,7 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
             pendingConfirmations.put(playerId, System.currentTimeMillis() + CONFIRM_SECONDS * 1000L);
             send(player, "locale.returnWarning",
-                    "<gold>You were moved from <red><x>, <y>, <z></red> in <world> because <red><reason></red>. Run <red>/spawnback confirm</red> within <seconds> seconds to go back anyway; you may take damage or die.</gold>",
+                    "<gold>You were moved from <red><x>, <y>, <z></red> in <world> because <red><reason></red>. Run <click:run_command:'/spawnback confirm'><hover:show_text:'<gold>Click to confirm your return</gold>'><red>/spawnback confirm</red></hover></click> within <seconds> seconds to go back anyway; you may take damage or die.</gold>",
                     coordinates(point), Placeholder.unparsed("reason", point.reason()),
                     Placeholder.unparsed("seconds", String.valueOf(CONFIRM_SECONDS)));
             return true;
@@ -103,6 +107,8 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
         }
 
         pendingConfirmations.remove(playerId);
+
+        boolean wasFlying = player.isFlying();
 
         // The record is only consumed once the player is actually standing there
         // again, so a failed teleport does not cost them the way back.
@@ -121,6 +127,8 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
                 }
 
                 returnLocationStore.clear(playerId);
+                if (wasFlying && regionFlightService != null)
+                    regionFlightService.resumeFlight(player);
                 send(player, "locale.returnConfirmed",
                         "<gold>Returning you to <red><x>, <y>, <z></red> in <world>. Good luck.</gold>",
                         coordinates(point));

@@ -276,7 +276,7 @@ public final class LoginMigrationService {
             return;
 
         send(player, "locale.returnAvailable",
-                "<gold>Run <red>/spawnback</red> if you want to go back there anyway.</gold>");
+                "<gold>Run <click:run_command:'/spawnback'><hover:show_text:'<gold>Click to run <red>/spawnback</red></gold>'><red>/spawnback</red></hover></click> if you want to go back there anyway.</gold>");
 
     }
 
