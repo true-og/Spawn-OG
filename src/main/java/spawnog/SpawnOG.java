@@ -8,6 +8,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import spawnog.commands.SetSpawnCommand;
 import spawnog.commands.SpawnBackCommand;
 import spawnog.commands.SpawnCommand;
+import spawnog.flight.FlightIntentStore;
 import spawnog.flight.RegionFlightService;
 import spawnog.flight.ToggleRegionFlightCommand;
 import spawnog.integration.MyWorldsSpawnBridge;
@@ -69,9 +70,12 @@ public final class SpawnOG extends JavaPlugin {
                 && getServer().getPluginManager().isPluginEnabled("WorldEdit"))
         {
 
-            regionFlightService = new RegionFlightService(this, loginMigrationService);
+            regionFlightService = new RegionFlightService(this, loginMigrationService, new FlightIntentStore(this));
             getServer().getPluginManager().registerEvents(regionFlightService, this);
             getCommand("fly").setExecutor(new ToggleRegionFlightCommand(regionFlightService));
+            // Login safety asks before rescuing an airborne player, so a flyer
+            // whose wings come back in place is left where they logged out.
+            loginMigrationService.setFlightEligibility(regionFlightService::willResumeFlightAt);
 
         } else if (getConfig().getBoolean("flight.enabled", true)) {
 

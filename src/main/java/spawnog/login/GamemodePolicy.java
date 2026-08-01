@@ -6,6 +6,7 @@ import java.util.Locale;
 import java.util.Set;
 
 import org.bukkit.GameMode;
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
 import spawnog.SpawnOG;
@@ -42,13 +43,15 @@ public final class GamemodePolicy {
 
     }
 
-    // True when the player is allowed to stay in the gamemode they logged in with.
-    public boolean mayUse(Player player, GameMode gamemode) {
+    // True when the player is allowed to hold the gamemode they logged in with
+    // at the location. Judged against wherever they will actually end up, so a
+    // rescue teleport asks about its destination rather than the login spot.
+    public boolean mayUse(Player player, GameMode gamemode, Location location) {
 
         if (gamemode == GameMode.SURVIVAL)
             return true;
 
-        Boolean answer = authority == null ? null : authority.mayUse(player, gamemode);
+        Boolean answer = authority == null ? null : authority.mayUse(player, gamemode, location);
         if (answer != null)
             return answer;
 
@@ -62,7 +65,7 @@ public final class GamemodePolicy {
             return true;
 
         Set<String> creativeRegions = creativeRegions();
-        return regionLookup.regionsAt(player.getLocation()).stream().anyMatch(creativeRegions::contains);
+        return regionLookup.regionsAt(location).stream().anyMatch(creativeRegions::contains);
 
     }
 

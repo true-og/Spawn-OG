@@ -11,8 +11,8 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 import spawnog.SpawnOG;
 
-// Crash-safe YAML file backing the login stores.
-abstract class YamlStore {
+// Crash-safe YAML file backing the persistent per-player stores.
+public abstract class YamlStore {
 
     protected final SpawnOG plugin;
     protected final YamlConfiguration data;

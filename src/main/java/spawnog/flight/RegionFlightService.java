@@ -51,16 +51,20 @@ public final class RegionFlightService implements Listener {
 
     private final SpawnOG plugin;
     private final LoginMigrationService loginMigrationService;
+    private final FlightIntentStore flightIntentStore;
     private final Map<String, RuleKind> regionRules = new HashMap<>();
     private final Map<UUID, FlightOverride> flightOverrides = new HashMap<>();
     private final Set<UUID> fallImmunity = new HashSet<>();
     private final Set<UUID> scheduledRefreshes = new HashSet<>();
     private int particleStep;
 
-    public RegionFlightService(SpawnOG plugin, LoginMigrationService loginMigrationService) {
+    public RegionFlightService(SpawnOG plugin, LoginMigrationService loginMigrationService,
+            FlightIntentStore flightIntentStore)
+    {
 
         this.plugin = plugin;
         this.loginMigrationService = loginMigrationService;
+        this.flightIntentStore = flightIntentStore;
         loginMigrationService.addCompletionListener(this::scheduleRefresh);
         loadRules();
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::spawnFlightParticles, PARTICLE_INITIAL_DELAY_TICKS,
@@ -70,8 +74,7 @@ public final class RegionFlightService implements Listener {
 
     public boolean canToggleFlight(Player player) {
 
-        if (player == null
-                || !(player.hasPermission(FLIGHT_PERMISSION) || player.hasPermission(LEGACY_FLIGHT_PERMISSION)))
+        if (player == null || !hasFlightPermission(player))
             return false;
         RegionRule rule = currentRule(player);
         return rule != null && rule.kind() == RuleKind.FLY;
@@ -121,6 +124,13 @@ public final class RegionFlightService implements Listener {
 
         }
 
+        // The choice outlives the session: an enabled toggle is re-armed on the
+        // next login or region entry, a disabled one stays off until asked again.
+        if (enable)
+            flightIntentStore.record(player);
+        else
+            flightIntentStore.clear(player);
+
         return player.getAllowFlight();
 
     }
@@ -147,7 +157,7 @@ public final class RegionFlightService implements Listener {
 
         }
 
-        if (!(player.hasPermission(FLIGHT_PERMISSION) || player.hasPermission(LEGACY_FLIGHT_PERMISSION)))
+        if (!hasFlightPermission(player))
             return false;
 
         // Inside a fly region, go through the toggle so reconciliation keeps the
@@ -190,7 +200,14 @@ public final class RegionFlightService implements Listener {
             if (previous != null && previous.kind() == RuleKind.NOFLY)
                 restoreOverride(player, previous);
             previous = flightOverrides.get(playerId);
-            if (previous != null && previous.kind() == RuleKind.FLY) {
+            if (previous == null) {
+
+                rearmPersistedFlight(player, rule);
+                return;
+
+            }
+
+            if (previous.kind() == RuleKind.FLY) {
 
                 if (player.getAllowFlight() != previous.appliedAllowFlight()) {
 
@@ -374,11 +391,56 @@ public final class RegionFlightService implements Listener {
 
     }
 
+    // Whether refresh() will re-arm flight for the player at the location: a
+    // stored intent, flight permission, and a fly rule all present. Login safety
+    // asks this before rescuing an airborne player, because a flyer who gets
+    // their wings back in place has nothing to be rescued from.
+    public boolean willResumeFlightAt(Player player, org.bukkit.Location location) {
+
+        if (player == null || location == null)
+            return false;
+        if (!flightIntentStore.contains(player.getUniqueId()) || !hasFlightPermission(player))
+            return false;
+
+        RegionRule rule = ruleAt(location);
+        return rule != null && rule.kind() == RuleKind.FLY;
+
+    }
+
+    // Re-grants flight inside a fly region for a player whose stored intent says
+    // /fly was left on. The live ability is dropped on quit (and by login
+    // normalization), so without this the toggle would not survive a relog.
+    private void rearmPersistedFlight(Player player, RegionRule rule) {
+
+        if (!flightIntentStore.contains(player.getUniqueId()) || !hasFlightPermission(player))
+            return;
+
+        // Another authority (creative mode, a bypass, another plugin) already
+        // allows flight; there is nothing to arm and no override to track.
+        if (player.getAllowFlight())
+            return;
+
+        player.setAllowFlight(true);
+        flightOverrides.put(player.getUniqueId(), new FlightOverride(false, true, rule.regionId(), RuleKind.FLY));
+
+        // A player re-armed in mid-air relogged while flying and is already
+        // falling, so put them back into flight instead of letting them drop.
+        if (!isOnSafeSurface(player))
+            player.setFlying(true);
+
+    }
+
     private RegionRule currentRule(Player player) {
+
+        return ruleAt(player.getLocation());
+
+    }
+
+    private RegionRule ruleAt(org.bukkit.Location bukkitLocation) {
 
         RegionContainer container = WorldGuard.getInstance().getPlatform().getRegionContainer();
         RegionQuery query = container.createQuery();
-        Location location = BukkitAdapter.adapt(player.getLocation());
+        Location location = BukkitAdapter.adapt(bukkitLocation);
         ApplicableRegionSet applicable = query.getApplicableRegions(location);
         RegionRule best = null;
 
@@ -403,6 +465,12 @@ public final class RegionFlightService implements Listener {
     private boolean hasBypass(Player player) {
 
         return player.hasPermission(BYPASS_PERMISSION) || player.hasPermission(LEGACY_BYPASS_PERMISSION);
+
+    }
+
+    private boolean hasFlightPermission(Player player) {
+
+        return player.hasPermission(FLIGHT_PERMISSION) || player.hasPermission(LEGACY_FLIGHT_PERMISSION);
 
     }
 

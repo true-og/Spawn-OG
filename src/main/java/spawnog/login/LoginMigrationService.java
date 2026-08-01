@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 
 import net.kyori.adventure.text.Component;
@@ -34,6 +35,10 @@ public final class LoginMigrationService {
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final Map<UUID, PendingLogin> pendingLogins = new HashMap<>();
     private final List<Consumer<Player>> completionListeners = new ArrayList<>();
+    // Answers whether regional flight will be re-armed for a player at a
+    // location. Set after construction because the flight service takes this
+    // service in its own constructor; stays null when regional flight is off.
+    private BiPredicate<Player, Location> flightEligibility;
 
     public LoginMigrationService(SpawnOG plugin, AutopsyMigrationStore migrationStore,
             ReturnLocationStore returnLocationStore, GamemodePolicy gamemodePolicy)
@@ -56,7 +61,7 @@ public final class LoginMigrationService {
         boolean staff = isStaff(player);
         // Any non-survival login is normalized unless the player is entitled to
         // that gamemode where they logged in; being staff is not enough on its own.
-        boolean mayKeepGamemode = gamemodePolicy.mayUse(player, originalGamemode);
+        boolean mayKeepGamemode = gamemodePolicy.mayUse(player, originalGamemode, player.getLocation());
         boolean normalizeGamemode = managedWorld && !mayKeepGamemode
                 && plugin.getConfig().getBoolean("login-safety.normalize-non-staff-gamemode", true);
         // A sanctioned spectator is working, not an abandoned autopsy state.
@@ -67,11 +72,27 @@ public final class LoginMigrationService {
                 || originalGamemode == GameMode.ADVENTURE;
         LocationSafety.Issue issue = vulnerableAfterLogin ? LocationSafety.check(player.getLocation())
                 : LocationSafety.Issue.NONE;
+        // A lethal drop is not lethal for a flyer whose regional flight will be
+        // re-armed on that very spot, so they are left in the air instead of
+        // being pulled to spawn only for /spawnback to drop them later.
+        if ((issue == LocationSafety.Issue.LONG_FALL || issue == LocationSafety.Issue.VOID) && flightEligibility != null
+                && flightEligibility.test(player, player.getLocation()))
+            issue = LocationSafety.Issue.NONE;
         boolean unsafe = issue.unsafe();
 
         Location destination = plannedDestination;
         if (destination == null && (autopsyMigration || unsafe))
             destination = globalSpawn();
+
+        // The player ends up at the destination, so their right to the login
+        // gamemode is judged there too: a creative login rescued into the spawn
+        // creative region keeps creative instead of being dropped to survival.
+        if (destination != null && !mayKeepGamemode && gamemodePolicy.mayUse(player, originalGamemode, destination)) {
+
+            normalizeGamemode = false;
+            autopsyMigration = false;
+
+        }
 
         boolean teleportRequired = destination != null;
         if (!teleportRequired && !normalizeGamemode)
@@ -110,6 +131,12 @@ public final class LoginMigrationService {
     public void addCompletionListener(Consumer<Player> listener) {
 
         completionListeners.add(listener);
+
+    }
+
+    public void setFlightEligibility(BiPredicate<Player, Location> flightEligibility) {
+
+        this.flightEligibility = flightEligibility;
 
     }
 
@@ -272,7 +299,10 @@ public final class LoginMigrationService {
     private void offerReturn(Player player, PendingLogin pending) {
 
         String reason = pending.autopsyMigration() ? AUTOPSY_REASON : pending.safetyIssue().description();
-        if (!returnLocationStore.record(player.getUniqueId(), player.getName(), pending.originalLocation(), reason))
+        // The pre-migration flight state travels with the record, so /spawnback
+        // can put a rescued flyer back into the air instead of dropping them.
+        if (!returnLocationStore.record(player.getUniqueId(), player.getName(), pending.originalLocation(), reason,
+                pending.originalAllowFlight(), pending.originalFlying()))
             return;
 
         send(player, "locale.returnAvailable",

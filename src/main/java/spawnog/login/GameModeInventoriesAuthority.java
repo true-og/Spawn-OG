@@ -2,6 +2,7 @@ package spawnog.login;
 
 import me.eccentric_nz.gamemodeinventories.api.GameModePolicy;
 import org.bukkit.GameMode;
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
@@ -33,7 +34,7 @@ public final class GameModeInventoriesAuthority implements GamemodeAuthority {
     }
 
     @Override
-    public Boolean mayUse(Player player, GameMode gamemode) {
+    public Boolean mayUse(Player player, GameMode gamemode, Location location) {
 
         // Looked up per call rather than cached: reloading GameModeInventories-OG
         // republishes a new policy, and disabling it must hand the rules back.
@@ -42,7 +43,7 @@ public final class GameModeInventoriesAuthority implements GamemodeAuthority {
         if (registration == null)
             return null;
 
-        return registration.getProvider().mayUse(player, gamemode, player.getLocation());
+        return registration.getProvider().mayUse(player, gamemode, location);
 
     }
 

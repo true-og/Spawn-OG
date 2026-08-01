@@ -25,7 +25,9 @@ public final class ReturnLocationStore extends YamlStore {
 
     }
 
-    public boolean record(UUID playerId, String playerName, Location location, String reason) {
+    public boolean record(UUID playerId, String playerName, Location location, String reason, boolean allowFlight,
+            boolean flying)
+    {
 
         if (location == null || location.getWorld() == null)
             return false;
@@ -40,6 +42,10 @@ public final class ReturnLocationStore extends YamlStore {
         data.set(path + ".location.z", location.getZ());
         data.set(path + ".location.yaw", location.getYaw());
         data.set(path + ".location.pitch", location.getPitch());
+        // Flight state from before the migration touched it, so the return
+        // teleport can resume flight for a player who was airborne.
+        data.set(path + ".allow-flight", allowFlight);
+        data.set(path + ".flying", flying);
 
         if (save("return location for " + playerName))
             return true;
@@ -71,7 +77,10 @@ public final class ReturnLocationStore extends YamlStore {
                 data.getDouble(path + ".location.y"), data.getDouble(path + ".location.z"),
                 (float) data.getDouble(path + ".location.yaw"), (float) data.getDouble(path + ".location.pitch"));
 
-        return new ReturnPoint(location, data.getString(path + ".reason", "it was flagged unsafe"), world.getName());
+        // Records written before flight state was stored read as false, which
+        // matches the old behavior of never resuming flight.
+        return new ReturnPoint(location, data.getString(path + ".reason", "it was flagged unsafe"), world.getName(),
+                data.getBoolean(path + ".allow-flight", false), data.getBoolean(path + ".flying", false));
 
     }
 
@@ -98,7 +107,7 @@ public final class ReturnLocationStore extends YamlStore {
 
     }
 
-    public record ReturnPoint(Location location, String reason, String worldName) {
+    public record ReturnPoint(Location location, String reason, String worldName, boolean allowFlight, boolean flying) {
     }
 
 }

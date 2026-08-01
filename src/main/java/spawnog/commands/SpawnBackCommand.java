@@ -108,8 +108,6 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
         pendingConfirmations.remove(playerId);
 
-        boolean wasFlying = player.isFlying();
-
         // The record is only consumed once the player is actually standing there
         // again, so a failed teleport does not cost them the way back.
         player.teleportAsync(point.location().clone()).whenComplete((success, error) -> {
@@ -127,8 +125,7 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
                 }
 
                 returnLocationStore.clear(playerId);
-                if (wasFlying && regionFlightService != null)
-                    regionFlightService.resumeFlight(player);
+                restoreFlight(player, point);
                 send(player, "locale.returnConfirmed",
                         "<gold>Returning you to <red><x>, <y>, <z></red> in <world>. Good luck.</gold>",
                         coordinates(point));
@@ -138,6 +135,28 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
         });
 
         return true;
+
+    }
+
+    // The migration strips flight before /spawnback can ever observe it, so the
+    // record carries the pre-migration state: a player who was airborne is put
+    // back into the air instead of being dropped from the sky.
+    private void restoreFlight(Player player, ReturnPoint point) {
+
+        if (!point.flying())
+            return;
+
+        if (regionFlightService != null) {
+
+            regionFlightService.resumeFlight(player);
+            return;
+
+        }
+
+        // Without regional flight management only an ability another authority
+        // still grants (creative mode, another plugin) can be resumed.
+        if (player.getAllowFlight())
+            player.setFlying(true);
 
     }
 

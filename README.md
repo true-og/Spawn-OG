@@ -43,7 +43,9 @@ the build limits.
 
 `/spawnback` warns why the position was flagged; `/spawnback confirm` within
 thirty seconds sends the player back at their own risk. One shot per migration,
-stored in `return-locations.yml`.
+stored in `return-locations.yml`. The record carries the pre-migration flight
+state, so a player who was airborne when the migration took them is put back
+into the air on return instead of being dropped from the sky.
 
 ## Regional flight
 
@@ -51,6 +53,15 @@ Inside a `fly` region, players with `spawnog.flight` can toggle flight using
 `/fly`. Inside a `nofly` region, flight is suspended unless the player has
 `spawnog.flight.bypass`. Previous flight permission is restored on region exit
 or disconnect, and fall damage caused by forced landing is cancelled once.
+
+An enabled `/fly` toggle is a persistent choice, stored in `flight-intents.yml`
+until the player toggles it off. Flight is re-armed automatically whenever the
+player is inside a `fly` region with permission: after a relog, after a login
+safety migration, and on region re-entry. A player who relogs in mid-air where
+their flight will be re-armed is left there flying rather than treated as an
+unsafe login, and gamemode entitlement is judged at the destination of a rescue
+teleport, so a creative login pulled into the spawn creative region keeps
+creative (and its flight) instead of being dropped to survival.
 
 ## Regional item drops
 
