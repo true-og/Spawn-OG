@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiPredicate;
@@ -20,18 +19,19 @@ import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
 import spawnog.SpawnOG;
+import spawnog.world.ManagedWorlds;
 
 public final class LoginMigrationService {
 
     private static final List<String> DEFAULT_STAFF_PERMISSIONS = List.of("spawnog.login-migration.bypass",
             "staffog.seebroadcast", "chat-og.staff", "sv.use");
-    private static final Set<String> DEFAULT_WORLDS = Set.of("world", "world_nether", "world_the_end");
     private static final String AUTOPSY_REASON = "you were left in spectator mode by the OG:SMP autopsy";
 
     private final SpawnOG plugin;
     private final AutopsyMigrationStore migrationStore;
     private final ReturnLocationStore returnLocationStore;
     private final GamemodePolicy gamemodePolicy;
+    private final ManagedWorlds managedWorlds;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final Map<UUID, PendingLogin> pendingLogins = new HashMap<>();
     private final List<Consumer<Player>> completionListeners = new ArrayList<>();
@@ -41,13 +41,14 @@ public final class LoginMigrationService {
     private BiPredicate<Player, Location> flightEligibility;
 
     public LoginMigrationService(SpawnOG plugin, AutopsyMigrationStore migrationStore,
-            ReturnLocationStore returnLocationStore, GamemodePolicy gamemodePolicy)
+            ReturnLocationStore returnLocationStore, GamemodePolicy gamemodePolicy, ManagedWorlds managedWorlds)
     {
 
         this.plugin = plugin;
         this.migrationStore = migrationStore;
         this.returnLocationStore = returnLocationStore;
         this.gamemodePolicy = gamemodePolicy;
+        this.managedWorlds = managedWorlds;
 
     }
 
@@ -300,9 +301,10 @@ public final class LoginMigrationService {
 
         String reason = pending.autopsyMigration() ? AUTOPSY_REASON : pending.safetyIssue().description();
         // The pre-migration flight state travels with the record, so /spawnback
-        // can put a rescued flyer back into the air instead of dropping them.
+        // can put a rescued flyer back into the air instead of dropping them,
+        // and the gamemode with it so it can tell whose flight it was.
         if (!returnLocationStore.record(player.getUniqueId(), player.getName(), pending.originalLocation(), reason,
-                pending.originalAllowFlight(), pending.originalFlying()))
+                pending.originalGamemode(), pending.originalAllowFlight(), pending.originalFlying()))
             return;
 
         send(player, "locale.returnAvailable",
@@ -335,10 +337,7 @@ public final class LoginMigrationService {
 
     private boolean isManagedWorld(Player player) {
 
-        List<String> configuredWorlds = plugin.getConfig().getStringList("login-safety.worlds");
-        if (configuredWorlds.isEmpty())
-            return DEFAULT_WORLDS.contains(player.getWorld().getName());
-        return configuredWorlds.stream().anyMatch(world -> world.equalsIgnoreCase(player.getWorld().getName()));
+        return managedWorlds.contains(player.getWorld());
 
     }
 

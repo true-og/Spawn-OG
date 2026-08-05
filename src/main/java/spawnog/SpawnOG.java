@@ -20,7 +20,9 @@ import spawnog.login.ReturnLocationStore;
 import spawnog.listener.SpawnListener;
 import spawnog.region.RegionLookup;
 import spawnog.region.WorldGuardRegionLookup;
+import spawnog.teleport.FallProtection;
 import spawnog.teleport.SpawnWarmupService;
+import spawnog.world.ManagedWorlds;
 
 @Slf4j
 public final class SpawnOG extends JavaPlugin {
@@ -35,6 +37,8 @@ public final class SpawnOG extends JavaPlugin {
     private LoginMigrationService loginMigrationService;
     private RegionFlightService regionFlightService;
     private SpawnWarmupService spawnWarmupService;
+    private FallProtection fallProtection;
+    private ManagedWorlds managedWorlds;
 
     @Override
     public void onEnable() {
@@ -49,6 +53,11 @@ public final class SpawnOG extends JavaPlugin {
         spawnWarmupService = new SpawnWarmupService(this);
         getServer().getPluginManager().registerEvents(spawnWarmupService, this);
 
+        // Registered unconditionally: a /spawnback return has to cushion the
+        // landing even on a server with no WorldGuard and no regional flight.
+        fallProtection = new FallProtection();
+        getServer().getPluginManager().registerEvents(fallProtection, this);
+
         myWorldsSpawnBridge = new MyWorldsSpawnBridge(this);
         getServer().getPluginManager().registerEvents(myWorldsSpawnBridge, this);
         // Deferred a tick so MyWorlds has finished loading its worlds and stamping
@@ -58,19 +67,27 @@ public final class SpawnOG extends JavaPlugin {
         register("spawn", new SpawnCommand(spawnWarmupService), "spawnog.spawn");
         register("setspawn", new SetSpawnCommand(myWorldsSpawnBridge), "spawnog.setspawn");
 
+        // Registered before the login listener so a player's world is on record
+        // before login safety can move them out of it.
+        managedWorlds = new ManagedWorlds(this);
+        getServer().getPluginManager().registerEvents(managedWorlds, this);
+
         AutopsyMigrationStore migrationStore = new AutopsyMigrationStore(this);
         ReturnLocationStore returnLocationStore = new ReturnLocationStore(this);
         GamemodePolicy gamemodePolicy = new GamemodePolicy(this, regionLookup(),
                 GameModeInventoriesAuthority.find(this));
-        loginMigrationService = new LoginMigrationService(this, migrationStore, returnLocationStore, gamemodePolicy);
-        getServer().getPluginManager().registerEvents(new SpawnListener(this, loginMigrationService), this);
+        loginMigrationService = new LoginMigrationService(this, migrationStore, returnLocationStore, gamemodePolicy,
+                managedWorlds);
+        getServer().getPluginManager().registerEvents(new SpawnListener(this, loginMigrationService, managedWorlds),
+                this);
 
         if (getConfig().getBoolean("flight.enabled", true)
                 && getServer().getPluginManager().isPluginEnabled("WorldGuard")
                 && getServer().getPluginManager().isPluginEnabled("WorldEdit"))
         {
 
-            regionFlightService = new RegionFlightService(this, loginMigrationService, new FlightIntentStore(this));
+            regionFlightService = new RegionFlightService(this, loginMigrationService, new FlightIntentStore(this),
+                    fallProtection);
             getServer().getPluginManager().registerEvents(regionFlightService, this);
             getCommand("fly").setExecutor(new ToggleRegionFlightCommand(regionFlightService));
             // Login safety asks before rescuing an airborne player, so a flyer
@@ -86,7 +103,7 @@ public final class SpawnOG extends JavaPlugin {
         // Constructed after the flight service so /spawnback can hand players
         // their wings back once the return teleport lands.
         SpawnBackCommand spawnBackCommand = new SpawnBackCommand(this, returnLocationStore, loginMigrationService,
-                regionFlightService);
+                regionFlightService, fallProtection);
         register("spawnback", spawnBackCommand, "spawnog.spawnback");
         getServer().getPluginManager().registerEvents(spawnBackCommand, this);
 
@@ -101,6 +118,10 @@ public final class SpawnOG extends JavaPlugin {
             loginMigrationService.close();
         if (regionFlightService != null)
             regionFlightService.close();
+        if (fallProtection != null)
+            fallProtection.close();
+        if (managedWorlds != null)
+            managedWorlds.close();
 
     }
 

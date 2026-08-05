@@ -64,6 +64,25 @@ public final class LocationSafety {
 
     }
 
+    // Whether something underfoot will hold the player: ground, a block they are
+    // standing on, or liquid. Tells a finished landing from a fall still in
+    // progress, which is when a granted fall protection is no longer owed.
+    public static boolean isSupported(Location feet) {
+
+        if (feet == null)
+            return false;
+        return isSolidUnderfoot(feet.clone().subtract(0.0D, 0.08D, 0.0D))
+                || isSolidUnderfoot(feet.clone().subtract(0.0D, 0.51D, 0.0D));
+
+    }
+
+    private static boolean isSolidUnderfoot(Location location) {
+
+        Block block = location.getBlock();
+        return block.isLiquid() || !block.isPassable();
+
+    }
+
     private static Issue checkLanding(Block feet, World world) {
 
         Block block = feet;

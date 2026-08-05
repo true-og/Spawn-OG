@@ -9,6 +9,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -26,6 +27,7 @@ import spawnog.flight.RegionFlightService;
 import spawnog.login.LoginMigrationService;
 import spawnog.login.ReturnLocationStore;
 import spawnog.login.ReturnLocationStore.ReturnPoint;
+import spawnog.teleport.FallProtection;
 
 // Sends a player back to wherever a login safety migration took them from. The
 // position is knowingly unsafe, so the first call only warns and the teleport
@@ -39,17 +41,20 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
     private final LoginMigrationService loginMigrationService;
     // Null when regional flight management is disabled or WorldGuard is absent.
     private final RegionFlightService regionFlightService;
+    private final FallProtection fallProtection;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final Map<UUID, Long> pendingConfirmations = new HashMap<>();
 
     public SpawnBackCommand(SpawnOG plugin, ReturnLocationStore returnLocationStore,
-            LoginMigrationService loginMigrationService, RegionFlightService regionFlightService)
+            LoginMigrationService loginMigrationService, RegionFlightService regionFlightService,
+            FallProtection fallProtection)
     {
 
         this.plugin = plugin;
         this.returnLocationStore = returnLocationStore;
         this.loginMigrationService = loginMigrationService;
         this.regionFlightService = regionFlightService;
+        this.fallProtection = fallProtection;
 
     }
 
@@ -125,6 +130,10 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
                 }
 
                 returnLocationStore.clear(playerId);
+                // Cushions the landing for everyone, at every destination, and
+                // whether or not flight could be restored: Spawn-OG is the
+                // reason the player is not standing where they left off.
+                fallProtection.grant(player);
                 restoreFlight(player, point);
                 send(player, "locale.returnConfirmed",
                         "<gold>Returning you to <red><x>, <y>, <z></red> in <world>. Good luck.</gold>",
@@ -146,17 +155,38 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
         if (!point.flying())
             return;
 
-        if (regionFlightService != null) {
+        // Creative and spectator carry flight of their own: GameModeInventories-OG
+        // and NoClip-OG only ever set a gamemode and let the server grant the
+        // ability from it. A player still holding one of those already has the
+        // ability and is only missing the airborne flag. One the migration
+        // normalized out of it lost the flight along with the gamemode, and a
+        // regional grant in its place would be a different, wider kind of flight
+        // than they ever had: it outlives the region and the gamemode both.
+        // A record too old to name a gamemode cannot prove otherwise.
+        boolean gamemodeOwned = point.gamemode() == null || carriesOwnFlight(point.gamemode())
+                || carriesOwnFlight(player.getGameMode());
 
-            regionFlightService.resumeFlight(player);
+        // Without regional flight management only an ability another authority
+        // still grants can be resumed either.
+        if (gamemodeOwned || regionFlightService == null) {
+
+            if (player.getAllowFlight())
+                player.setFlying(true);
             return;
 
         }
 
-        // Without regional flight management only an ability another authority
-        // still grants (creative mode, another plugin) can be resumed.
-        if (player.getAllowFlight())
-            player.setFlying(true);
+        if (!regionFlightService.resumeFlight(player))
+            send(player, "locale.returnFlightDenied",
+                    "<gold>Flight could not be restored here. Your landing is cushioned, but nothing else about the spot is.</gold>");
+
+    }
+
+    // Gamemodes the server grants flight for by itself, so no plugin owns the
+    // ability and none should hand it back.
+    private static boolean carriesOwnFlight(GameMode gamemode) {
+
+        return gamemode == GameMode.CREATIVE || gamemode == GameMode.SPECTATOR;
 
     }
 

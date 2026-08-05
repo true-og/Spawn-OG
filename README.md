@@ -43,9 +43,31 @@ the build limits.
 
 `/spawnback` warns why the position was flagged; `/spawnback confirm` within
 thirty seconds sends the player back at their own risk. One shot per migration,
-stored in `return-locations.yml`. The record carries the pre-migration flight
-state, so a player who was airborne when the migration took them is put back
-into the air on return instead of being dropped from the sky.
+stored in `return-locations.yml`, which also carries the pre-migration gamemode
+and flight state.
+
+Fall damage on arrival is always cancelled, for every player and every return
+point. Nothing else is: a return into lava or over the void is still fatal.
+
+An airborne player is put back in the air, but only into the flight they had:
+
+- Regional `/fly` is re-granted. Outside a `fly` region it is a loan, revoked on
+  landing, so `/spawnback` never leaves flight behind.
+- Creative and spectator flight is not. `/gmic` and `/nc` only set a gamemode
+  and let the server derive the ability. Still in that gamemode, the player just
+  starts flying again; normalized out of it, they fall, because a regional grant
+  would outlive the gamemode it replaced.
+
+Records predating the stored gamemode are treated as the second case.
+
+## Respawn
+
+Bed, then Essentials `home`, then the configured spawn — but only inside the
+worlds from `login-safety.worlds`. Anything resolving outside them (a bed in a
+minigame world, a death in one) is dropped in favour of the last of those worlds
+the player was in. Beds and homes in the SMP are unaffected.
+
+Set `respawn-at-home: false` to send every death to the configured spawn.
 
 ## Regional flight
 
@@ -54,14 +76,15 @@ Inside a `fly` region, players with `spawnog.flight` can toggle flight using
 `spawnog.flight.bypass`. Previous flight permission is restored on region exit
 or disconnect, and fall damage caused by forced landing is cancelled once.
 
-An enabled `/fly` toggle is a persistent choice, stored in `flight-intents.yml`
-until the player toggles it off. Flight is re-armed automatically whenever the
-player is inside a `fly` region with permission: after a relog, after a login
-safety migration, and on region re-entry. A player who relogs in mid-air where
-their flight will be re-armed is left there flying rather than treated as an
-unsafe login, and gamemode entitlement is judged at the destination of a rescue
-teleport, so a creative login pulled into the spawn creative region keeps
-creative (and its flight) instead of being dropped to survival.
+An enabled `/fly` toggle sticks, stored in `flight-intents.yml` until toggled
+off, and is re-armed on relog, after a migration, and on region re-entry.
+
+Two consequences worth knowing:
+
+- Relogging mid-air where flight will be re-armed is not an unsafe login. The
+  player is left flying instead of pulled to spawn.
+- Gamemode entitlement is judged at a rescue teleport's destination, so a
+  creative login pulled into the spawn creative region keeps creative.
 
 ## Regional item drops
 

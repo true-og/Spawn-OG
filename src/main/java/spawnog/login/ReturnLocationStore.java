@@ -3,6 +3,7 @@ package spawnog.login;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.World;
 
@@ -25,8 +26,8 @@ public final class ReturnLocationStore extends YamlStore {
 
     }
 
-    public boolean record(UUID playerId, String playerName, Location location, String reason, boolean allowFlight,
-            boolean flying)
+    public boolean record(UUID playerId, String playerName, Location location, String reason, GameMode gamemode,
+            boolean allowFlight, boolean flying)
     {
 
         if (location == null || location.getWorld() == null)
@@ -43,7 +44,10 @@ public final class ReturnLocationStore extends YamlStore {
         data.set(path + ".location.yaw", location.getYaw());
         data.set(path + ".location.pitch", location.getPitch());
         // Flight state from before the migration touched it, so the return
-        // teleport can resume flight for a player who was airborne.
+        // teleport can resume flight for a player who was airborne. The gamemode
+        // travels with it because creative and spectator carry flight of their
+        // own, and that kind is not Spawn-OG's to hand back.
+        data.set(path + ".gamemode", gamemode == null ? null : gamemode.name());
         data.set(path + ".allow-flight", allowFlight);
         data.set(path + ".flying", flying);
 
@@ -78,9 +82,31 @@ public final class ReturnLocationStore extends YamlStore {
                 (float) data.getDouble(path + ".location.yaw"), (float) data.getDouble(path + ".location.pitch"));
 
         // Records written before flight state was stored read as false, which
-        // matches the old behavior of never resuming flight.
+        // matches the old behavior of never resuming flight. Their gamemode
+        // reads as null, which the caller treats as unproven.
         return new ReturnPoint(location, data.getString(path + ".reason", "it was flagged unsafe"), world.getName(),
-                data.getBoolean(path + ".allow-flight", false), data.getBoolean(path + ".flying", false));
+                gamemode(path), data.getBoolean(path + ".allow-flight", false),
+                data.getBoolean(path + ".flying", false));
+
+    }
+
+    // Null when the record predates the field or names a gamemode this server no
+    // longer has, so an unreadable value is never mistaken for survival.
+    private GameMode gamemode(String path) {
+
+        String recorded = data.getString(path + ".gamemode");
+        if (recorded == null)
+            return null;
+
+        try {
+
+            return GameMode.valueOf(recorded);
+
+        } catch (IllegalArgumentException error) {
+
+            return null;
+
+        }
 
     }
 
@@ -107,7 +133,11 @@ public final class ReturnLocationStore extends YamlStore {
 
     }
 
-    public record ReturnPoint(Location location, String reason, String worldName, boolean allowFlight, boolean flying) {
+    // gamemode is the one the player held before the migration, or null when the
+    // record cannot say.
+    public record ReturnPoint(Location location, String reason, String worldName, GameMode gamemode,
+            boolean allowFlight, boolean flying)
+    {
     }
 
 }

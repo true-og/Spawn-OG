@@ -5,7 +5,8 @@ newbies:
   spawnpoint: newbie
 login-safety:
   enabled: true
-  # Only these SMP dimensions are normalized. Add other survival worlds explicitly.
+  # Only these SMP dimensions are normalized, and respawns are kept inside them.
+  # Add other survival worlds explicitly.
   worlds:
     - world
     - world_nether
@@ -57,6 +58,9 @@ locale:
   # <reason> explains why the location was flagged. <seconds> is the confirmation window.
   returnWarning: "<gold>You were moved from <red><x>, <y>, <z></red> in <world> because <red><reason></red>. Run <click:run_command:'/spawnback confirm'><hover:show_text:'<gold>Click to confirm your return</gold>'><red>/spawnback confirm</red></hover></click> within <seconds> seconds to go back anyway; you may take damage or die.</gold>"
   returnConfirmed: "<gold>Returning you to <red><x>, <y>, <z></red> in <world>. Good luck.</gold>"
+  # Sent when the return point forbids flight, or the player may not fly there.
+  # Fall damage is cancelled on every return regardless.
+  returnFlightDenied: "<gold>Flight could not be restored here. Your landing is cushioned, but nothing else about the spot is.</gold>"
   returnNone: "<red>You have no location to return to.</red>"
   returnWorldMissing: "<red>The world you were in (<world>) is not loaded, so you cannot return there.</red>"
   returnBusy: "<red>Your login is still being made safe. Try again in a few seconds.</red>"

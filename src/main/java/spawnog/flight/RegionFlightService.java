@@ -16,11 +16,9 @@ import com.sk89q.worldguard.protection.regions.RegionContainer;
 import com.sk89q.worldguard.protection.regions.RegionQuery;
 import org.bukkit.Color;
 import org.bukkit.Particle;
-import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerKickEvent;
@@ -31,7 +29,9 @@ import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.util.Vector;
 
 import spawnog.SpawnOG;
+import spawnog.login.LocationSafety;
 import spawnog.login.LoginMigrationService;
+import spawnog.teleport.FallProtection;
 
 public final class RegionFlightService implements Listener {
 
@@ -52,19 +52,25 @@ public final class RegionFlightService implements Listener {
     private final SpawnOG plugin;
     private final LoginMigrationService loginMigrationService;
     private final FlightIntentStore flightIntentStore;
+    private final FallProtection fallProtection;
     private final Map<String, RuleKind> regionRules = new HashMap<>();
     private final Map<UUID, FlightOverride> flightOverrides = new HashMap<>();
-    private final Set<UUID> fallImmunity = new HashSet<>();
+    // Players flying on a grant that belongs to no region, handed out so a
+    // /spawnback return does not drop them from the height that got them
+    // rescued. Tracked separately from the region overrides because it is
+    // revoked by landing rather than by leaving a region.
+    private final Set<UUID> landingGrants = new HashSet<>();
     private final Set<UUID> scheduledRefreshes = new HashSet<>();
     private int particleStep;
 
     public RegionFlightService(SpawnOG plugin, LoginMigrationService loginMigrationService,
-            FlightIntentStore flightIntentStore)
+            FlightIntentStore flightIntentStore, FallProtection fallProtection)
     {
 
         this.plugin = plugin;
         this.loginMigrationService = loginMigrationService;
         this.flightIntentStore = flightIntentStore;
+        this.fallProtection = fallProtection;
         loginMigrationService.addCompletionListener(this::scheduleRefresh);
         loadRules();
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::spawnFlightParticles, PARTICLE_INITIAL_DELAY_TICKS,
@@ -136,20 +142,27 @@ public final class RegionFlightService implements Listener {
     }
 
     // Puts a player back into the air after a plugin-driven teleport when they
-    // were flying beforehand. The teleport's region refresh has already run by
-    // the time this is called, so re-enabling here is not overwritten. Refuses
-    // when the player lacks flight permission or the destination forbids flight.
+    // were flying beforehand. False means the player was left airborne without
+    // flight, so the caller can say why. Refuses when the player lacks flight
+    // permission or the destination forbids flight.
     public boolean resumeFlight(Player player) {
 
         if (player == null || !player.isOnline())
             return false;
 
+        // Reconcile against where the player now stands before granting
+        // anything. The override from the region they were teleported out of is
+        // still in the map, and leaving it there lets the next refresh restore
+        // it and take the flight straight back a tick later.
+        refresh(player);
+
+        UUID playerId = player.getUniqueId();
         RegionRule rule = currentRule(player);
         if (rule != null && rule.kind() == RuleKind.NOFLY && !hasBypass(player))
             return false;
 
         // Flight already allowed by another authority (creative, bypass, an
-        // active override): only the airborne flag needs restoring.
+        // intent the refresh above re-armed): only the airborne flag is missing.
         if (player.getAllowFlight()) {
 
             player.setFlying(true);
@@ -160,14 +173,27 @@ public final class RegionFlightService implements Listener {
         if (!hasFlightPermission(player))
             return false;
 
-        // Inside a fly region, go through the toggle so reconciliation keeps the
-        // override; elsewhere the raw ability is enough, since refresh only acts
-        // where rules or overrides exist.
-        if (rule != null && rule.kind() == RuleKind.FLY)
-            toggleFlight(player);
-        else
-            player.setAllowFlight(true);
+        // Every grant is recorded, so leaving the region, a nofly rule, and
+        // disconnecting can all take it back. An unrecorded one would survive
+        // into the player's saved abilities and become permanent free flight.
+        if (rule != null && rule.kind() == RuleKind.FLY) {
 
+            player.setAllowFlight(true);
+            flightOverrides.put(playerId, new FlightOverride(false, true, rule.regionId(), RuleKind.FLY));
+            player.setFlying(true);
+            return true;
+
+        }
+
+        // On solid ground there is nothing to resume: the player is not falling,
+        // so a grant here would only have to be taken back again.
+        if (isOnSafeSurface(player))
+            return true;
+
+        // No region rule speaks for this spot, so the grant is a loan that lasts
+        // until the player is back on the ground rather than a lasting ability.
+        player.setAllowFlight(true);
+        landingGrants.add(playerId);
         player.setFlying(true);
         return true;
 
@@ -186,6 +212,15 @@ public final class RegionFlightService implements Listener {
 
         UUID playerId = player.getUniqueId();
         RegionRule rule = currentRule(player);
+
+        // The landing loan ends once the player is down, and at once inside a
+        // region that denies them flight. Revoked before the branches below read
+        // the ability, so a nofly region records the player's own flight state
+        // as the original rather than the loan and cannot hand it back later.
+        if (landingGrants.contains(playerId)
+                && (isOnSafeSurface(player) || rule != null && rule.kind() == RuleKind.NOFLY && !hasBypass(player)))
+            revokeLandingGrant(player);
+
         FlightOverride previous = flightOverrides.get(playerId);
 
         if (rule == null) {
@@ -268,13 +303,22 @@ public final class RegionFlightService implements Listener {
 
         if (player == null)
             return;
+        // Before the override, so a loan is never mistaken for an ability the
+        // player owned and written back into their saved abilities on quit.
+        revokeLandingGrant(player);
         restoreOverride(player, flightOverrides.get(player.getUniqueId()));
-        fallImmunity.remove(player.getUniqueId());
 
     }
 
     public void close() {
 
+        Set.copyOf(landingGrants).forEach(playerId -> {
+
+            Player player = plugin.getServer().getPlayer(playerId);
+            if (player != null)
+                revokeLandingGrant(player);
+
+        });
         Set.copyOf(flightOverrides.keySet()).forEach(playerId -> {
 
             Player player = plugin.getServer().getPlayer(playerId);
@@ -283,7 +327,7 @@ public final class RegionFlightService implements Listener {
 
         });
         flightOverrides.clear();
-        fallImmunity.clear();
+        landingGrants.clear();
         scheduledRefreshes.clear();
 
     }
@@ -332,9 +376,6 @@ public final class RegionFlightService implements Listener {
         if (!sameBlock)
             refresh(player);
 
-        if (fallImmunity.contains(player.getUniqueId()) && isOnSafeSurface(player) && !player.isFlying())
-            fallImmunity.remove(player.getUniqueId());
-
     }
 
     @EventHandler
@@ -348,16 +389,6 @@ public final class RegionFlightService implements Listener {
     public void onKick(PlayerKickEvent event) {
 
         restore(event.getPlayer());
-
-    }
-
-    @EventHandler
-    public void onDamage(EntityDamageEvent event) {
-
-        if (event.getCause() != EntityDamageEvent.DamageCause.FALL || !(event.getEntity() instanceof Player player))
-            return;
-        if (fallImmunity.remove(player.getUniqueId()))
-            event.setCancelled(true);
 
     }
 
@@ -474,6 +505,15 @@ public final class RegionFlightService implements Listener {
 
     }
 
+    private void revokeLandingGrant(Player player) {
+
+        if (!landingGrants.remove(player.getUniqueId()))
+            return;
+        stopFlyingSafely(player);
+        player.setAllowFlight(false);
+
+    }
+
     private void restoreOverride(Player player, FlightOverride state) {
 
         if (state == null)
@@ -490,7 +530,7 @@ public final class RegionFlightService implements Listener {
 
         if (player.isFlying()) {
 
-            fallImmunity.add(player.getUniqueId());
+            fallProtection.grant(player);
             player.setFlying(false);
 
         }
@@ -499,16 +539,7 @@ public final class RegionFlightService implements Listener {
 
     private boolean isOnSafeSurface(Player player) {
 
-        org.bukkit.Location feet = player.getLocation();
-        return isSafeSurface(feet.clone().subtract(0.0D, 0.08D, 0.0D))
-                || isSafeSurface(feet.clone().subtract(0.0D, 0.51D, 0.0D));
-
-    }
-
-    private boolean isSafeSurface(org.bukkit.Location location) {
-
-        Block block = location.getBlock();
-        return block.isLiquid() || !block.isPassable();
+        return LocationSafety.isSupported(player.getLocation());
 
     }
 
