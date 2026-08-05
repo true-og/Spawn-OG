@@ -66,7 +66,14 @@ public final class LoginMigrationService {
         boolean normalizeGamemode = managedWorld && !mayKeepGamemode
                 && plugin.getConfig().getBoolean("login-safety.normalize-non-staff-gamemode", true);
         // A sanctioned spectator is working, not an abandoned autopsy state.
-        boolean autopsyMigration = managedWorld && !staff && !mayKeepGamemode && originalGamemode == GameMode.SPECTATOR
+        // A minigame puts its own players into spectator legitimately, so a disconnect
+        // from an arena looks exactly
+        // like the abandoned season 1 state this migration exists to rescue. Migrating
+        // one of those would burn the
+        // player's one-shot flag and record the arena as their /spawnback location.
+        boolean minigameArena = MinigameArenas.contains(player);
+        boolean autopsyMigration = managedWorld && !staff && !mayKeepGamemode && !minigameArena
+                && originalGamemode == GameMode.SPECTATOR
                 && plugin.getConfig().getBoolean("login-safety.autopsy-migration.enabled", true)
                 && !migrationStore.hasMigrated(player.getUniqueId());
         boolean vulnerableAfterLogin = normalizeGamemode || originalGamemode == GameMode.SURVIVAL
