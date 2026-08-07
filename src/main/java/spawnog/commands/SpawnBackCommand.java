@@ -9,7 +9,6 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
-import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -150,43 +149,38 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
     // The migration strips flight before /spawnback can ever observe it, so the
     // record carries the pre-migration state: a player who was airborne is put
     // back into the air instead of being dropped from the sky.
+    //
+    // Which flight they get is decided at the return point, never copied out of
+    // the record. GameModeInventories-OG and NoClip-OG only ever set a gamemode
+    // and let the server derive the ability from it, so a player normalized out
+    // of creative or spectator has no ability of their own left to resume. The
+    // regional service stands in with the narrowest flight that covers the
+    // descent: a tracked grant inside a fly region, a loan revoked on landing
+    // anywhere else. Neither outlives the fall, so refusing to help would only
+    // drop the player from the height that got them rescued.
     private void restoreFlight(Player player, ReturnPoint point) {
 
         if (!point.flying())
             return;
 
-        // Creative and spectator carry flight of their own: GameModeInventories-OG
-        // and NoClip-OG only ever set a gamemode and let the server grant the
-        // ability from it. A player still holding one of those already has the
-        // ability and is only missing the airborne flag. One the migration
-        // normalized out of it lost the flight along with the gamemode, and a
-        // regional grant in its place would be a different, wider kind of flight
-        // than they ever had: it outlives the region and the gamemode both.
-        // A record too old to name a gamemode cannot prove otherwise.
-        boolean gamemodeOwned = point.gamemode() == null || carriesOwnFlight(point.gamemode())
-                || carriesOwnFlight(player.getGameMode());
+        // Without regional flight management there is no authority to grant
+        // anything, so only an ability the player still holds can be resumed.
+        if (regionFlightService == null) {
 
-        // Without regional flight management only an ability another authority
-        // still grants can be resumed either.
-        if (gamemodeOwned || regionFlightService == null) {
+            if (player.getAllowFlight()) {
 
-            if (player.getAllowFlight())
                 player.setFlying(true);
+                return;
+
+            }
+
+        } else if (regionFlightService.resumeFlight(player)) {
+
             return;
 
         }
 
-        if (!regionFlightService.resumeFlight(player))
-            send(player, "locale.returnFlightDenied",
-                    "<gold>Flight could not be restored here. Your landing is cushioned, but nothing else about the spot is.</gold>");
-
-    }
-
-    // Gamemodes the server grants flight for by itself, so no plugin owns the
-    // ability and none should hand it back.
-    private static boolean carriesOwnFlight(GameMode gamemode) {
-
-        return gamemode == GameMode.CREATIVE || gamemode == GameMode.SPECTATOR;
+        send(player, "locale.returnFlightDenied", "<gold>You don't have the authority to fly here.</gold>");
 
     }
 

@@ -49,16 +49,25 @@ and flight state.
 Fall damage on arrival is always cancelled, for every player and every return
 point. Nothing else is: a return into lava or over the void is still fatal.
 
-An airborne player is put back in the air, but only into the flight they had:
+An airborne player is put back in the air, into the narrowest flight that covers
+the descent. What they get is decided at the return point, not copied out of the
+record:
 
-- Regional `/fly` is re-granted. Outside a `fly` region it is a loan, revoked on
-  landing, so `/spawnback` never leaves flight behind.
-- Creative and spectator flight is not. `/gmic` and `/nc` only set a gamemode
-  and let the server derive the ability. Still in that gamemode, the player just
-  starts flying again; normalized out of it, they fall, because a regional grant
-  would outlive the gamemode it replaced.
+- Inside a `fly` region, regional flight is granted and tracked, so leaving the
+  region takes it back.
+- Anywhere else it is a loan, revoked the moment the player lands, so
+  `/spawnback` never leaves flight behind.
+- Inside a `nofly` region nothing is granted unless the player has
+  `spawnog.flight.bypass`, and `/spawnback` says so instead of failing silently.
 
-Records predating the stored gamemode are treated as the second case.
+`/gmic` and `/nc` only set a gamemode and let the server derive flight from it,
+so a player the migration normalized out of creative or spectator has no ability
+of their own left to resume. The loan stands in for it and expires on landing,
+rather than outliving the gamemode it replaced. A player still holding one of
+those gamemodes simply starts flying again.
+
+Records predating the stored gamemode are handled the same way; only the stored
+airborne flag decides whether flight is resumed at all.
 
 ## Respawn
 
@@ -79,12 +88,22 @@ or disconnect, and fall damage caused by forced landing is cancelled once.
 An enabled `/fly` toggle sticks, stored in `flight-intents.yml` until toggled
 off, and is re-armed on relog, after a migration, and on region re-entry.
 
-Two consequences worth knowing:
+Grants are revoked on disconnect so none is ever written into a player's saved
+abilities and becomes permanent free flight. That also grounds them, which the
+saved abilities then remember instead of the flight, so a player taken out of
+the air on the way out is noted in `airborne-quits.yml` and their next login
+reads as airborne again. The note is spent by that login, whether or not it
+migrates them.
+
+Three consequences worth knowing:
 
 - Relogging mid-air where flight will be re-armed is not an unsafe login. The
   player is left flying instead of pulled to spawn.
 - Gamemode entitlement is judged at a rescue teleport's destination, so a
   creative login pulled into the spawn creative region keeps creative.
+- Logging out mid-air on a grant and back in somewhere lethal still counts as
+  the airborne login it was, so `/spawnback` returns the flight rather than the
+  fall.
 
 ## Regional item drops
 

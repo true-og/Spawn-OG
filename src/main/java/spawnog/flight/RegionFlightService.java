@@ -52,6 +52,7 @@ public final class RegionFlightService implements Listener {
     private final SpawnOG plugin;
     private final LoginMigrationService loginMigrationService;
     private final FlightIntentStore flightIntentStore;
+    private final AirborneQuitStore airborneQuitStore;
     private final FallProtection fallProtection;
     private final Map<String, RuleKind> regionRules = new HashMap<>();
     private final Map<UUID, FlightOverride> flightOverrides = new HashMap<>();
@@ -64,12 +65,13 @@ public final class RegionFlightService implements Listener {
     private int particleStep;
 
     public RegionFlightService(SpawnOG plugin, LoginMigrationService loginMigrationService,
-            FlightIntentStore flightIntentStore, FallProtection fallProtection)
+            FlightIntentStore flightIntentStore, AirborneQuitStore airborneQuitStore, FallProtection fallProtection)
     {
 
         this.plugin = plugin;
         this.loginMigrationService = loginMigrationService;
         this.flightIntentStore = flightIntentStore;
+        this.airborneQuitStore = airborneQuitStore;
         this.fallProtection = fallProtection;
         loginMigrationService.addCompletionListener(this::scheduleRefresh);
         loadRules();
@@ -303,27 +305,35 @@ public final class RegionFlightService implements Listener {
 
         if (player == null)
             return;
+
+        // Read before the revoke. Taking the grant back takes the airborne state
+        // with it, and the player's saved abilities are the only thing the next
+        // login can consult, so the fact has to be written down somewhere else.
+        boolean wasFlying = player.isFlying();
+
         // Before the override, so a loan is never mistaken for an ability the
         // player owned and written back into their saved abilities on quit.
         revokeLandingGrant(player);
         restoreOverride(player, flightOverrides.get(player.getUniqueId()));
 
+        // Only when this call is what grounded them: a creative flyer keeps
+        // flying through it and has nothing for the next login to recover.
+        if (wasFlying && !player.isFlying())
+            airborneQuitStore.record(player);
+
     }
 
     public void close() {
 
-        Set.copyOf(landingGrants).forEach(playerId -> {
+        Set<UUID> granted = new HashSet<>(landingGrants);
+        granted.addAll(flightOverrides.keySet());
+        // Through restore(), so a shutdown records the players it grounds exactly
+        // like a disconnect does.
+        granted.forEach(playerId -> {
 
             Player player = plugin.getServer().getPlayer(playerId);
             if (player != null)
-                revokeLandingGrant(player);
-
-        });
-        Set.copyOf(flightOverrides.keySet()).forEach(playerId -> {
-
-            Player player = plugin.getServer().getPlayer(playerId);
-            if (player != null)
-                restoreOverride(player, flightOverrides.get(playerId));
+                restore(player);
 
         });
         flightOverrides.clear();

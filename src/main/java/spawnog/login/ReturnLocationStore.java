@@ -43,10 +43,10 @@ public final class ReturnLocationStore extends YamlStore {
         data.set(path + ".location.z", location.getZ());
         data.set(path + ".location.yaw", location.getYaw());
         data.set(path + ".location.pitch", location.getPitch());
-        // Flight state from before the migration touched it, so the return
-        // teleport can resume flight for a player who was airborne. The gamemode
-        // travels with it because creative and spectator carry flight of their
-        // own, and that kind is not Spawn-OG's to hand back.
+        // Flight state from before the migration touched it. Only the airborne
+        // flag decides whether the return teleport resumes flight; the gamemode
+        // and the ability are written so staff reading this file can see what a
+        // player actually lost, not to be replayed onto them.
         data.set(path + ".gamemode", gamemode == null ? null : gamemode.name());
         data.set(path + ".allow-flight", allowFlight);
         data.set(path + ".flying", flying);
@@ -83,7 +83,7 @@ public final class ReturnLocationStore extends YamlStore {
 
         // Records written before flight state was stored read as false, which
         // matches the old behavior of never resuming flight. Their gamemode
-        // reads as null, which the caller treats as unproven.
+        // reads as null, which no longer changes the outcome.
         return new ReturnPoint(location, data.getString(path + ".reason", "it was flagged unsafe"), world.getName(),
                 gamemode(path), data.getBoolean(path + ".allow-flight", false),
                 data.getBoolean(path + ".flying", false));
@@ -134,7 +134,8 @@ public final class ReturnLocationStore extends YamlStore {
     }
 
     // gamemode is the one the player held before the migration, or null when the
-    // record cannot say.
+    // record cannot say. It and allowFlight are kept for diagnosis: /spawnback
+    // decides what flight to hand back from the return point, not from these.
     public record ReturnPoint(Location location, String reason, String worldName, GameMode gamemode,
             boolean allowFlight, boolean flying)
     {

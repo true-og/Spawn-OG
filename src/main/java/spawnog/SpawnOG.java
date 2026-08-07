@@ -8,6 +8,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import spawnog.commands.SetSpawnCommand;
 import spawnog.commands.SpawnBackCommand;
 import spawnog.commands.SpawnCommand;
+import spawnog.flight.AirborneQuitStore;
 import spawnog.flight.FlightIntentStore;
 import spawnog.flight.RegionFlightService;
 import spawnog.flight.ToggleRegionFlightCommand;
@@ -74,10 +75,13 @@ public final class SpawnOG extends JavaPlugin {
 
         AutopsyMigrationStore migrationStore = new AutopsyMigrationStore(this);
         ReturnLocationStore returnLocationStore = new ReturnLocationStore(this);
+        // Shared by both sides of the quit: the flight service writes it when it
+        // grounds a player on the way out, login safety spends it on the way in.
+        AirborneQuitStore airborneQuitStore = new AirborneQuitStore(this);
         GamemodePolicy gamemodePolicy = new GamemodePolicy(this, regionLookup(),
                 GameModeInventoriesAuthority.find(this));
-        loginMigrationService = new LoginMigrationService(this, migrationStore, returnLocationStore, gamemodePolicy,
-                managedWorlds);
+        loginMigrationService = new LoginMigrationService(this, migrationStore, returnLocationStore, airborneQuitStore,
+                gamemodePolicy, managedWorlds);
         getServer().getPluginManager().registerEvents(new SpawnListener(this, loginMigrationService, managedWorlds),
                 this);
 
@@ -87,7 +91,7 @@ public final class SpawnOG extends JavaPlugin {
         {
 
             regionFlightService = new RegionFlightService(this, loginMigrationService, new FlightIntentStore(this),
-                    fallProtection);
+                    airborneQuitStore, fallProtection);
             getServer().getPluginManager().registerEvents(regionFlightService, this);
             getCommand("fly").setExecutor(new ToggleRegionFlightCommand(regionFlightService));
             // Login safety asks before rescuing an airborne player, so a flyer

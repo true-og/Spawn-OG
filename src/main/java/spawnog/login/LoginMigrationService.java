@@ -19,6 +19,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
 import spawnog.SpawnOG;
+import spawnog.flight.AirborneQuitStore;
 import spawnog.world.ManagedWorlds;
 
 public final class LoginMigrationService {
@@ -30,6 +31,7 @@ public final class LoginMigrationService {
     private final SpawnOG plugin;
     private final AutopsyMigrationStore migrationStore;
     private final ReturnLocationStore returnLocationStore;
+    private final AirborneQuitStore airborneQuitStore;
     private final GamemodePolicy gamemodePolicy;
     private final ManagedWorlds managedWorlds;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
@@ -41,18 +43,26 @@ public final class LoginMigrationService {
     private BiPredicate<Player, Location> flightEligibility;
 
     public LoginMigrationService(SpawnOG plugin, AutopsyMigrationStore migrationStore,
-            ReturnLocationStore returnLocationStore, GamemodePolicy gamemodePolicy, ManagedWorlds managedWorlds)
+            ReturnLocationStore returnLocationStore, AirborneQuitStore airborneQuitStore, GamemodePolicy gamemodePolicy,
+            ManagedWorlds managedWorlds)
     {
 
         this.plugin = plugin;
         this.migrationStore = migrationStore;
         this.returnLocationStore = returnLocationStore;
+        this.airborneQuitStore = airborneQuitStore;
         this.gamemodePolicy = gamemodePolicy;
         this.managedWorlds = managedWorlds;
 
     }
 
     public boolean handleLogin(Player player, Location plannedDestination) {
+
+        // Spent on every join, ahead of every early return, so one quit answers
+        // one login. A player Spawn-OG grounded on the way out logs back in with
+        // the airborne state already stripped from their saved abilities, and
+        // this is the only record that they were flying when they left.
+        boolean originalFlying = player.isFlying() || airborneQuitStore.consume(player.getUniqueId());
 
         if (!plugin.getConfig().getBoolean("login-safety.enabled", true))
             return false;
@@ -117,7 +127,8 @@ public final class LoginMigrationService {
 
         }
 
-        beginTransaction(player, destination, originalGamemode, normalizeGamemode, autopsyMigration, issue);
+        beginTransaction(player, destination, originalGamemode, originalFlying, normalizeGamemode, autopsyMigration,
+                issue);
         return true;
 
     }
@@ -162,14 +173,17 @@ public final class LoginMigrationService {
     }
 
     private void beginTransaction(Player player, Location destination, GameMode originalGamemode,
-            boolean normalizeGamemode, boolean autopsyMigration, LocationSafety.Issue issue)
+            boolean originalFlying, boolean normalizeGamemode, boolean autopsyMigration, LocationSafety.Issue issue)
     {
 
         UUID playerId = player.getUniqueId();
         if (pendingLogins.containsKey(playerId))
             return;
 
-        PendingLogin pending = new PendingLogin(player.isInvulnerable(), player.getAllowFlight(), player.isFlying(),
+        // The ability is read live while the airborne flag is not: a recovered
+        // quit says the player was flying, not that they still hold a grant to
+        // do it with, and rollback must not hand out one that nothing revokes.
+        PendingLogin pending = new PendingLogin(player.isInvulnerable(), player.getAllowFlight(), originalFlying,
                 originalGamemode, player.getLocation().clone(), normalizeGamemode, autopsyMigration, issue);
         pendingLogins.put(playerId, pending);
 
