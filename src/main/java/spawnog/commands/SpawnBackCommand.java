@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import spawnog.SpawnOG;
 import spawnog.flight.FlightMode;
 import spawnog.flight.FlightRestorer;
+import spawnog.login.LocationSafety;
 import spawnog.login.LoginMigrationService;
 import spawnog.login.ReturnLocationStore;
 import spawnog.login.ReturnLocationStore.ReturnPoint;
@@ -112,9 +113,26 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
         }
 
+        // A plain return still teleports without touching gamemode or flight,
+        // but the spot itself may have been built over or buried since the
+        // rescue, so it is lifted to the nearest clear position above; falls
+        // stay covered by the fall protection granted below. Flight returns
+        // keep the exact spot: the flyer resumes in the air they left.
+        Location recorded = point.location().clone();
+        Location destination = recorded;
+        if (point.mode() == FlightMode.NONE) {
+
+            Location cleared = LocationSafety.clearAbove(recorded);
+            if (cleared != null)
+                destination = cleared;
+
+        }
+
+        boolean adjusted = destination.getBlockY() != recorded.getBlockY();
+
         // The record is only consumed once the player is actually standing there
         // again, so a failed teleport does not cost them the way back.
-        player.teleportAsync(point.location().clone()).whenComplete((success, error) -> {
+        player.teleportAsync(destination).whenComplete((success, error) -> {
 
             if (!plugin.isEnabled())
                 return;
@@ -146,6 +164,9 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
                 send(player, "locale.spawnbackExecuted",
                         "<gold>Returning you to <red><x>, <y>, <z></red> in <world>. Good luck.</gold>",
                         coordinates(point));
+                if (adjusted)
+                    send(player, "locale.spawnbackAdjusted",
+                            "<gold>The spot you left was no longer safe to stand in, so you were placed at the nearest safe location above it.</gold>");
 
             });
 

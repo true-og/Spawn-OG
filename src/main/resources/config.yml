@@ -66,6 +66,8 @@ locale:
   # Appended to the warning when the player's flight cannot be restored there.
   spawnbackFallWarning: "<gold>You can no longer fly there, so you will fall; a one-time fall protection will cover the landing.</gold>"
   spawnbackExecuted: "<gold>Returning you to <red><x>, <y>, <z></red> in <world>. Good luck.</gold>"
+  # Sent when a plain return had to move up to the nearest clear spot above the recorded location.
+  spawnbackAdjusted: "<gold>The spot you left was no longer safe to stand in, so you were placed at the nearest safe location above it.</gold>"
   # Sent when the return point forbids the player's prior mode of flight.
   # Fall damage is cancelled once on any return that restores no flight.
   returnFlightDenied: "<gold>You don't have the authority to fly here.</gold>"

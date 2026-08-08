@@ -32,6 +32,9 @@ public final class LoginMigrationService {
     private static final String AUTOPSY_REASON = "you were left in spectator mode by the OG:SMP autopsy";
     private static final String AIRBORNE_REASON = "you logged out mid-flight";
     private static final int DEFAULT_GRACE_SECONDS = 30;
+    // Logins restore the exact quit position; this slack only absorbs
+    // chunk-edge nudges, never a different place.
+    private static final double SNAPSHOT_DISTANCE_SQUARED = 16.0D;
 
     private final SpawnOG plugin;
     private final AutopsyMigrationStore migrationStore;
@@ -70,12 +73,24 @@ public final class LoginMigrationService {
 
         // A player who left mid-flight is unsafe by definition, regardless of
         // how safe the ground below looks: their flight was revoked on the way
-        // out and nothing has decided yet whether they get it back. Minigame
-        // arenas manage their own players, and unmanaged worlds are out of
-        // scope; the stale snapshot self-heals on the next grounded quit.
+        // out and nothing has decided yet whether they get it back. A snapshot
+        // is only believed when the login it greets still looks like the quit
+        // it recorded; a mismatch, a minigame arena, or an unmanaged world
+        // discards it on the spot so it can never ambush a later login.
         FlightSnapshot snapshot = flightSnapshotStore.peek(player.getUniqueId());
-        if (snapshot != null && isManagedWorld(player) && !MinigameArenas.contains(player))
-            return handleAirborneLogin(player, plannedDestination, snapshot);
+        if (snapshot != null) {
+
+            if (!isManagedWorld(player) || MinigameArenas.contains(player) || !corroborates(player, snapshot)) {
+
+                flightSnapshotStore.clear(player.getUniqueId());
+                plugin.getLogger().info("Discarded a flight snapshot for " + player.getName()
+                        + " that did not match their login state.");
+
+            } else
+
+                return handleAirborneLogin(player, plannedDestination, snapshot);
+
+        }
 
         return handleGroundedLogin(player, plannedDestination);
 
@@ -122,14 +137,18 @@ public final class LoginMigrationService {
 
         }
 
-        // The return point is the spot the snapshot recorded, which on a first
-        // login is where the player hangs right now; the fallback covers a
-        // snapshot whose world went away and a retry after a failed rescue.
-        Location origin = snapshot.location() == null ? player.getLocation().clone() : snapshot.location().clone();
-        beginTransaction(player, destination,
-                new PendingLogin(player.isInvulnerable(), snapshot.allowFlight(), true,
-                        snapshot.gamemode() == null ? player.getGameMode() : snapshot.gamemode(), origin, true, false,
-                        LocationSafety.Issue.NONE, snapshot));
+        // Corroboration has already pinned the snapshot to this login: the
+        // recorded spot is where the player hangs right now, and the recorded
+        // gamemode is the one they carry.
+        GameMode originalGamemode = snapshot.gamemode();
+        Location origin = snapshot.location().clone();
+        // Judged at the rescue destination, same as a grounded login: a
+        // creative flyer rescued into the spawn creative region keeps creative
+        // instead of being dropped to survival.
+        boolean normalizeGamemode = !gamemodePolicy.mayUse(player, originalGamemode, destination)
+                && plugin.getConfig().getBoolean("login-safety.normalize-non-staff-gamemode", true);
+        beginTransaction(player, destination, new PendingLogin(player.isInvulnerable(), snapshot.allowFlight(), true,
+                originalGamemode, origin, normalizeGamemode, false, LocationSafety.Issue.NONE, snapshot));
         return true;
 
     }
@@ -460,6 +479,28 @@ public final class LoginMigrationService {
     private boolean isManagedWorld(Player player) {
 
         return managedWorlds.contains(player.getWorld());
+
+    }
+
+    // Whether the player's live login state still looks like the quit the
+    // snapshot recorded: same spot, same gamemode, and still off the ground.
+    // Anything else means the snapshot describes an older session and must not
+    // drive a rescue or a flight-restoring return record. Live flight bits are
+    // not required on their own because RegionFlightService grounds /fly
+    // flyers on the way out after the snapshot is taken, so a genuine
+    // mid-flight quitter can relog with allow-flight off, hanging unsupported.
+    private boolean corroborates(Player player, FlightSnapshot snapshot) {
+
+        Location recorded = snapshot.location();
+        Location current = player.getLocation();
+        if (recorded == null || recorded.getWorld() == null || !recorded.getWorld().equals(current.getWorld()))
+            return false;
+        if (recorded.distanceSquared(current) > SNAPSHOT_DISTANCE_SQUARED)
+            return false;
+        if (snapshot.gamemode() == null || player.getGameMode() != snapshot.gamemode())
+            return false;
+
+        return player.isFlying() || player.getAllowFlight() || !LocationSafety.isSupported(current);
 
     }
 

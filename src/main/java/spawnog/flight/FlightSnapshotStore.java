@@ -81,7 +81,7 @@ public final class FlightSnapshotStore extends YamlStore {
     }
 
     // Null when the record predates the field or names a gamemode this server
-    // no longer has; classification then falls through to regional flight.
+    // no longer has; corroboration rejects such a record outright.
     private GameMode gamemode(String path) {
 
         String recorded = data.getString(path + ".gamemode");
@@ -115,14 +115,16 @@ public final class FlightSnapshotStore extends YamlStore {
     }
 
     // gamemode and location may be null for records written by older builds or
-    // pointing at unloaded worlds; mode() tolerates both.
+    // pointing at unloaded worlds; mode() tolerates both. An absent fly-intent
+    // reads false, so a doctored or truncated record classifies as NONE, never
+    // as a /fly grant the player did not have.
     public record FlightSnapshot(GameMode gamemode, Location location, boolean allowFlight, boolean flying,
             boolean noclip, boolean flyIntent)
     {
 
         public FlightMode mode() {
 
-            return FlightMode.classify(gamemode, noclip);
+            return FlightMode.classify(gamemode, noclip, flyIntent);
 
         }
 

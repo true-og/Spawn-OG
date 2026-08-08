@@ -83,6 +83,45 @@ public final class LocationSafety {
 
     }
 
+    // The lowest position at or above the given one where a player appearing
+    // there is not suffocated or burned on arrival: both the feet and head
+    // blocks are non-occluding and free of contact hazards. Landing is
+    // deliberately not judged, because scanning upward can never shorten a
+    // drop; the caller covers falls with fall protection. Returns the input
+    // unchanged when it is already clear, and null when its world is missing
+    // or every position up to the build limit is blocked.
+    public static Location clearAbove(Location location) {
+
+        if (location == null)
+            return null;
+
+        World world = location.getWorld();
+        if (world == null)
+            return null;
+
+        int x = location.getBlockX();
+        int z = location.getBlockZ();
+        int startY = Math.max(location.getBlockY(), world.getMinHeight());
+
+        for (int y = startY; y < world.getMaxHeight() - 1; y++) {
+
+            Block feet = world.getBlockAt(x, y, z);
+            Block head = feet.getRelative(BlockFace.UP);
+            if (feet.getType().isOccluding() || head.getType().isOccluding() || CONTACT_HAZARDS.contains(feet.getType())
+                    || CONTACT_HAZARDS.contains(head.getType()))
+                continue;
+
+            // The exact recorded position is kept whenever it is already clear.
+            if (y == location.getBlockY())
+                return location.clone();
+            return new Location(world, location.getX(), y, location.getZ(), location.getYaw(), location.getPitch());
+
+        }
+
+        return null;
+
+    }
+
     private static Issue checkLanding(Block feet, World world) {
 
         Block block = feet;
