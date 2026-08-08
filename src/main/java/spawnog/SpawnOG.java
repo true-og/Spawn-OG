@@ -8,15 +8,19 @@ import org.bukkit.plugin.java.JavaPlugin;
 import spawnog.commands.SetSpawnCommand;
 import spawnog.commands.SpawnBackCommand;
 import spawnog.commands.SpawnCommand;
-import spawnog.flight.AirborneQuitStore;
 import spawnog.flight.FlightIntentStore;
+import spawnog.flight.FlightQuitListener;
+import spawnog.flight.FlightRestorer;
+import spawnog.flight.FlightSnapshotStore;
 import spawnog.flight.RegionFlightService;
 import spawnog.flight.ToggleRegionFlightCommand;
 import spawnog.integration.MyWorldsSpawnBridge;
 import spawnog.login.AutopsyMigrationStore;
 import spawnog.login.GameModeInventoriesAuthority;
+import spawnog.login.GamemodeAuthority;
 import spawnog.login.GamemodePolicy;
 import spawnog.login.LoginMigrationService;
+import spawnog.login.NoClipAuthority;
 import spawnog.login.ReturnLocationStore;
 import spawnog.listener.SpawnListener;
 import spawnog.region.RegionLookup;
@@ -40,6 +44,7 @@ public final class SpawnOG extends JavaPlugin {
     private SpawnWarmupService spawnWarmupService;
     private FallProtection fallProtection;
     private ManagedWorlds managedWorlds;
+    private FlightQuitListener flightQuitListener;
 
     @Override
     public void onEnable() {
@@ -75,13 +80,15 @@ public final class SpawnOG extends JavaPlugin {
 
         AutopsyMigrationStore migrationStore = new AutopsyMigrationStore(this);
         ReturnLocationStore returnLocationStore = new ReturnLocationStore(this);
-        // Shared by both sides of the quit: the flight service writes it when it
-        // grounds a player on the way out, login safety spends it on the way in.
-        AirborneQuitStore airborneQuitStore = new AirborneQuitStore(this);
-        GamemodePolicy gamemodePolicy = new GamemodePolicy(this, regionLookup(),
-                GameModeInventoriesAuthority.find(this));
-        loginMigrationService = new LoginMigrationService(this, migrationStore, returnLocationStore, airborneQuitStore,
-                gamemodePolicy, managedWorlds);
+        // Written by the quit capture, read by the next login: the record of
+        // who left mid-flight and by which kind of flight.
+        FlightSnapshotStore flightSnapshotStore = new FlightSnapshotStore(this);
+        FlightIntentStore flightIntentStore = new FlightIntentStore(this);
+        NoClipAuthority noClipAuthority = NoClipAuthority.find(this);
+        GamemodeAuthority gamemodeAuthority = GameModeInventoriesAuthority.find(this);
+        GamemodePolicy gamemodePolicy = new GamemodePolicy(this, regionLookup(), gamemodeAuthority);
+        loginMigrationService = new LoginMigrationService(this, migrationStore, returnLocationStore,
+                flightSnapshotStore, gamemodePolicy, managedWorlds, fallProtection);
         getServer().getPluginManager().registerEvents(new SpawnListener(this, loginMigrationService, managedWorlds),
                 this);
 
@@ -90,13 +97,10 @@ public final class SpawnOG extends JavaPlugin {
                 && getServer().getPluginManager().isPluginEnabled("WorldEdit"))
         {
 
-            regionFlightService = new RegionFlightService(this, loginMigrationService, new FlightIntentStore(this),
-                    airborneQuitStore, fallProtection);
+            regionFlightService = new RegionFlightService(this, loginMigrationService, flightIntentStore,
+                    fallProtection);
             getServer().getPluginManager().registerEvents(regionFlightService, this);
             getCommand("fly").setExecutor(new ToggleRegionFlightCommand(regionFlightService));
-            // Login safety asks before rescuing an airborne player, so a flyer
-            // whose wings come back in place is left where they logged out.
-            loginMigrationService.setFlightEligibility(regionFlightService::willResumeFlightAt);
 
         } else if (getConfig().getBoolean("flight.enabled", true)) {
 
@@ -104,10 +108,19 @@ public final class SpawnOG extends JavaPlugin {
 
         }
 
-        // Constructed after the flight service so /spawnback can hand players
-        // their wings back once the return teleport lands.
+        // Captures the flight snapshot at LOWEST, before the flight service's
+        // NORMAL quit handler grounds the player.
+        flightQuitListener = new FlightQuitListener(this, flightSnapshotStore, flightIntentStore, noClipAuthority);
+        getServer().getPluginManager().registerEvents(flightQuitListener, this);
+
+        // One decision table for handing flight back, shared by the login
+        // bypass path and /spawnback so warning and outcome cannot disagree.
+        FlightRestorer flightRestorer = new FlightRestorer(regionFlightService, gamemodePolicy, gamemodeAuthority,
+                noClipAuthority);
+        loginMigrationService.setFlightRestorer(flightRestorer);
+
         SpawnBackCommand spawnBackCommand = new SpawnBackCommand(this, returnLocationStore, loginMigrationService,
-                regionFlightService, fallProtection);
+                flightRestorer, fallProtection);
         register("spawnback", spawnBackCommand, "spawnog.spawnback");
         getServer().getPluginManager().registerEvents(spawnBackCommand, this);
 
@@ -116,6 +129,10 @@ public final class SpawnOG extends JavaPlugin {
     @Override
     public void onDisable() {
 
+        // Snapshots first: a /reload fires no quit events, and the flight
+        // service's close() grounds every flyer it tracks.
+        if (flightQuitListener != null)
+            flightQuitListener.captureAll();
         if (spawnWarmupService != null)
             spawnWarmupService.close();
         if (loginMigrationService != null)

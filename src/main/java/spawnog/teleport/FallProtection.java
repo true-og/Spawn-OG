@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerKickEvent;
@@ -70,14 +71,17 @@ public final class FallProtection implements Listener {
 
     }
 
-    @EventHandler
+    // MONITOR so this runs after the flight service's NORMAL quit handler,
+    // which re-grants immunity while grounding flyers; clearing first would
+    // leak the entry and gift a free fall on the player's next session.
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent event) {
 
         clear(event.getPlayer());
 
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onKick(PlayerKickEvent event) {
 
         clear(event.getPlayer());

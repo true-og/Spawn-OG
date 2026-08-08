@@ -21,7 +21,7 @@ java {
 /* ----------------------------- Metadata ------------------------------ */
 group = "net.trueog.spawn-og" // Declare bundle identifier.
 
-version = "1.1" // Declare plugin version (will be in .jar).
+version = "1.2" // Declare plugin version (will be in .jar).
 
 val apiVersion = "1.19" // Declare minecraft server target version.
 
@@ -51,6 +51,7 @@ dependencies {
     compileOnlyApi(
         project(":libs:GameModeInventories-OG")
     ) // Import GameModeInventories-OG gamemode policy (from source).
+    compileOnlyApi(project(":libs:NoClip-OG")) // Import NoClip-OG gamemode policy (from source).
 }
 
 /* ---------------------- Reproducible jars ---------------------------- */

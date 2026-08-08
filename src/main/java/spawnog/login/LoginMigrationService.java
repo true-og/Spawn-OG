@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 
 import net.kyori.adventure.text.Component;
@@ -19,57 +18,127 @@ import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
 import spawnog.SpawnOG;
-import spawnog.flight.AirborneQuitStore;
+import spawnog.flight.FlightMode;
+import spawnog.flight.FlightRestorer;
+import spawnog.flight.FlightSnapshotStore;
+import spawnog.flight.FlightSnapshotStore.FlightSnapshot;
+import spawnog.teleport.FallProtection;
 import spawnog.world.ManagedWorlds;
 
 public final class LoginMigrationService {
 
-    private static final List<String> DEFAULT_STAFF_PERMISSIONS = List.of("spawnog.login-migration.bypass",
-            "staffog.seebroadcast", "chat-og.staff", "sv.use");
+    public static final String BYPASS_PERMISSION = "spawnog.login-migration.bypass";
+
     private static final String AUTOPSY_REASON = "you were left in spectator mode by the OG:SMP autopsy";
+    private static final String AIRBORNE_REASON = "you logged out mid-flight";
+    private static final int DEFAULT_GRACE_SECONDS = 30;
 
     private final SpawnOG plugin;
     private final AutopsyMigrationStore migrationStore;
     private final ReturnLocationStore returnLocationStore;
-    private final AirborneQuitStore airborneQuitStore;
+    private final FlightSnapshotStore flightSnapshotStore;
     private final GamemodePolicy gamemodePolicy;
     private final ManagedWorlds managedWorlds;
+    private final FallProtection fallProtection;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final Map<UUID, PendingLogin> pendingLogins = new HashMap<>();
     private final List<Consumer<Player>> completionListeners = new ArrayList<>();
-    // Answers whether regional flight will be re-armed for a player at a
-    // location. Set after construction because the flight service takes this
-    // service in its own constructor; stays null when regional flight is off.
-    private BiPredicate<Player, Location> flightEligibility;
+    // Decides whether and how a rescued flyer gets their flight back. Set after
+    // construction because it is built around the flight service, which takes
+    // this service in its own constructor.
+    private FlightRestorer flightRestorer;
 
     public LoginMigrationService(SpawnOG plugin, AutopsyMigrationStore migrationStore,
-            ReturnLocationStore returnLocationStore, AirborneQuitStore airborneQuitStore, GamemodePolicy gamemodePolicy,
-            ManagedWorlds managedWorlds)
+            ReturnLocationStore returnLocationStore, FlightSnapshotStore flightSnapshotStore,
+            GamemodePolicy gamemodePolicy, ManagedWorlds managedWorlds, FallProtection fallProtection)
     {
 
         this.plugin = plugin;
         this.migrationStore = migrationStore;
         this.returnLocationStore = returnLocationStore;
-        this.airborneQuitStore = airborneQuitStore;
+        this.flightSnapshotStore = flightSnapshotStore;
         this.gamemodePolicy = gamemodePolicy;
         this.managedWorlds = managedWorlds;
+        this.fallProtection = fallProtection;
 
     }
 
     public boolean handleLogin(Player player, Location plannedDestination) {
 
-        // Spent on every join, ahead of every early return, so one quit answers
-        // one login. A player Spawn-OG grounded on the way out logs back in with
-        // the airborne state already stripped from their saved abilities, and
-        // this is the only record that they were flying when they left.
-        boolean originalFlying = player.isFlying() || airborneQuitStore.consume(player.getUniqueId());
-
         if (!plugin.getConfig().getBoolean("login-safety.enabled", true))
             return false;
 
+        // A player who left mid-flight is unsafe by definition, regardless of
+        // how safe the ground below looks: their flight was revoked on the way
+        // out and nothing has decided yet whether they get it back. Minigame
+        // arenas manage their own players, and unmanaged worlds are out of
+        // scope; the stale snapshot self-heals on the next grounded quit.
+        FlightSnapshot snapshot = flightSnapshotStore.peek(player.getUniqueId());
+        if (snapshot != null && isManagedWorld(player) && !MinigameArenas.contains(player))
+            return handleAirborneLogin(player, plannedDestination, snapshot);
+
+        return handleGroundedLogin(player, plannedDestination);
+
+    }
+
+    // A relog in flight: either the player still has the right to that flight
+    // where they hang and holds the bypass, in which case it is resumed on the
+    // spot, or they are pulled to spawn with /spawnback as the way back.
+    private boolean handleAirborneLogin(Player player, Location plannedDestination, FlightSnapshot snapshot) {
+
+        FlightMode mode = snapshot.mode();
+
+        if (player.hasPermission(BYPASS_PERMISSION) && flightRestorer != null
+                && flightRestorer.canResumeInPlace(mode, player, player.getLocation())
+                && flightRestorer.resumeInPlace(mode, player))
+        {
+
+            player.setFallDistance(0.0F);
+            // Re-asserted a tick later: other plugins reconcile abilities during
+            // the join tick, and a flyer they briefly grounded must not fall.
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+
+                if (player.isOnline() && player.getAllowFlight() && !player.isFlying()
+                        && !LocationSafety.isSupported(player.getLocation()))
+                    player.setFlying(true);
+
+            });
+            flightSnapshotStore.clear(player.getUniqueId());
+            send(player, "locale.flightResumed", "<gold>Welcome back. Your flight was resumed where you left.</gold>");
+            return true;
+
+        }
+
+        Location destination = plannedDestination == null ? globalSpawn() : plannedDestination;
+        if (destination == null) {
+
+            // The snapshot is kept, so the next login can retry the rescue.
+            protectInPlace(player, snapshot, player.isInvulnerable());
+            send(player, "locale.loginSafetyFailed",
+                    "<red>Your login location could not be made safe because the global spawn is not configured. Staff have been notified.</red>");
+            plugin.getLogger().severe("Unable to safely migrate " + player.getName()
+                    + " because spawns.global.location is not configured.");
+            return true;
+
+        }
+
+        // The return point is the spot the snapshot recorded, which on a first
+        // login is where the player hangs right now; the fallback covers a
+        // snapshot whose world went away and a retry after a failed rescue.
+        Location origin = snapshot.location() == null ? player.getLocation().clone() : snapshot.location().clone();
+        beginTransaction(player, destination,
+                new PendingLogin(player.isInvulnerable(), snapshot.allowFlight(), true,
+                        snapshot.gamemode() == null ? player.getGameMode() : snapshot.gamemode(), origin, true, false,
+                        LocationSafety.Issue.NONE, snapshot));
+        return true;
+
+    }
+
+    private boolean handleGroundedLogin(Player player, Location plannedDestination) {
+
         boolean managedWorld = isManagedWorld(player);
         GameMode originalGamemode = player.getGameMode();
-        boolean staff = isStaff(player);
+        boolean staff = player.hasPermission(BYPASS_PERMISSION);
         // Any non-survival login is normalized unless the player is entitled to
         // that gamemode where they logged in; being staff is not enough on its own.
         boolean mayKeepGamemode = gamemodePolicy.mayUse(player, originalGamemode, player.getLocation());
@@ -90,12 +159,6 @@ public final class LoginMigrationService {
                 || originalGamemode == GameMode.ADVENTURE;
         LocationSafety.Issue issue = vulnerableAfterLogin ? LocationSafety.check(player.getLocation())
                 : LocationSafety.Issue.NONE;
-        // A lethal drop is not lethal for a flyer whose regional flight will be
-        // re-armed on that very spot, so they are left in the air instead of
-        // being pulled to spawn only for /spawnback to drop them later.
-        if ((issue == LocationSafety.Issue.LONG_FALL || issue == LocationSafety.Issue.VOID) && flightEligibility != null
-                && flightEligibility.test(player, player.getLocation()))
-            issue = LocationSafety.Issue.NONE;
         boolean unsafe = issue.unsafe();
 
         Location destination = plannedDestination;
@@ -118,7 +181,7 @@ public final class LoginMigrationService {
 
         if ((autopsyMigration || unsafe) && destination == null) {
 
-            protectAfterFailedRescue(player, originalGamemode, unsafe);
+            protectInPlace(player, null, player.isInvulnerable());
             send(player, "locale.loginSafetyFailed",
                     "<red>Your login location could not be made safe because the global spawn is not configured. Staff have been notified.</red>");
             plugin.getLogger().severe("Unable to safely migrate " + player.getName()
@@ -127,8 +190,9 @@ public final class LoginMigrationService {
 
         }
 
-        beginTransaction(player, destination, originalGamemode, originalFlying, normalizeGamemode, autopsyMigration,
-                issue);
+        beginTransaction(player, destination,
+                new PendingLogin(player.isInvulnerable(), player.getAllowFlight(), player.isFlying(), originalGamemode,
+                        player.getLocation().clone(), normalizeGamemode, autopsyMigration, issue, null));
         return true;
 
     }
@@ -153,9 +217,9 @@ public final class LoginMigrationService {
 
     }
 
-    public void setFlightEligibility(BiPredicate<Player, Location> flightEligibility) {
+    public void setFlightRestorer(FlightRestorer flightRestorer) {
 
-        this.flightEligibility = flightEligibility;
+        this.flightRestorer = flightRestorer;
 
     }
 
@@ -172,19 +236,12 @@ public final class LoginMigrationService {
 
     }
 
-    private void beginTransaction(Player player, Location destination, GameMode originalGamemode,
-            boolean originalFlying, boolean normalizeGamemode, boolean autopsyMigration, LocationSafety.Issue issue)
-    {
+    private void beginTransaction(Player player, Location destination, PendingLogin pending) {
 
         UUID playerId = player.getUniqueId();
         if (pendingLogins.containsKey(playerId))
             return;
 
-        // The ability is read live while the airborne flag is not: a recovered
-        // quit says the player was flying, not that they still hold a grant to
-        // do it with, and rollback must not hand out one that nothing revokes.
-        PendingLogin pending = new PendingLogin(player.isInvulnerable(), player.getAllowFlight(), originalFlying,
-                originalGamemode, player.getLocation().clone(), normalizeGamemode, autopsyMigration, issue);
         pendingLogins.put(playerId, pending);
 
         player.setInvulnerable(true);
@@ -241,10 +298,11 @@ public final class LoginMigrationService {
 
         if (!teleportSucceeded || teleportError != null || isUnsafe(player.getLocation())) {
 
-            protectAfterFailedRescue(player, pending.originalGamemode(), true);
-            player.setInvulnerable(pending.originalInvulnerable());
+            // The airborne snapshot survives a failed rescue, so the next login
+            // tries again instead of the failure becoming the final word.
+            protectInPlace(player, pending.snapshot(), pending.originalInvulnerable());
             send(player, "locale.loginSafetyFailed",
-                    "<red>Your login safety migration could not finish. You were left in a non-damaging gamemode; please contact staff.</red>");
+                    "<red>Your login safety migration could not finish. You were protected in place; please contact staff.</red>");
             plugin.getLogger().severe("Login safety transaction failed for " + player.getName()
                     + (teleportError == null ? "." : ": " + teleportError.getMessage()));
             return;
@@ -273,7 +331,20 @@ public final class LoginMigrationService {
 
         }
 
-        if (pending.autopsyMigration()) {
+        if (pending.snapshot() != null) {
+
+            Location from = pending.originalLocation();
+            send(player, "locale.flyingRescue",
+                    "<gold>You logged out mid-flight at <red><x>, <y>, <z></red> in <world> and were brought to spawn.</gold>",
+                    Placeholder.unparsed("x", String.valueOf(from.getBlockX())),
+                    Placeholder.unparsed("y", String.valueOf(from.getBlockY())),
+                    Placeholder.unparsed("z", String.valueOf(from.getBlockZ())),
+                    Placeholder.unparsed("world", from.getWorld() == null ? "unknown" : from.getWorld().getName()));
+            // The snapshot is only spent once the way back is safely on disk.
+            if (offerReturn(player, pending))
+                flightSnapshotStore.clear(player.getUniqueId());
+
+        } else if (pending.autopsyMigration()) {
 
             boolean recorded = migrationStore.record(player.getUniqueId(), player.getName(), pending.originalGamemode(),
                     pending.originalLocation());
@@ -318,29 +389,59 @@ public final class LoginMigrationService {
 
     }
 
-    private void offerReturn(Player player, PendingLogin pending) {
+    // Writes the /spawnback record and offers it. False means the player was
+    // told the way back could not be saved, and the caller must not spend
+    // whatever evidence would let a later login try again.
+    private boolean offerReturn(Player player, PendingLogin pending) {
 
-        String reason = pending.autopsyMigration() ? AUTOPSY_REASON : pending.safetyIssue().description();
-        // The pre-migration flight state travels with the record, so /spawnback
-        // can put a rescued flyer back into the air instead of dropping them,
-        // and the gamemode with it so it can tell whose flight it was.
+        String reason;
+        if (pending.snapshot() != null)
+            reason = AIRBORNE_REASON;
+        else if (pending.autopsyMigration())
+            reason = AUTOPSY_REASON;
+        else
+            reason = pending.safetyIssue().description();
+
+        FlightMode mode = pending.snapshot() == null ? FlightMode.NONE : pending.snapshot().mode();
         if (!returnLocationStore.record(player.getUniqueId(), player.getName(), pending.originalLocation(), reason,
-                pending.originalGamemode(), pending.originalAllowFlight(), pending.originalFlying()))
-            return;
+                pending.originalGamemode(), pending.originalAllowFlight(), pending.originalFlying(), mode))
+        {
+
+            send(player, "locale.returnRecordFailed",
+                    "<red>Your way back could not be saved. Staff have been notified.</red>");
+            plugin.getLogger().severe("Unable to record the return location for " + player.getName() + ".");
+            return false;
+
+        }
 
         send(player, "locale.returnAvailable",
                 "<gold>Run <click:run_command:'/spawnback'><hover:show_text:'<gold>Click to run <red>/spawnback</red></gold>'><red>/spawnback</red></hover></click> if you want to go back there anyway.</gold>");
+        return true;
 
     }
 
-    private void protectAfterFailedRescue(Player player, GameMode originalGamemode, boolean unsafe) {
+    // The failure mode when a rescue cannot run or finish: the player keeps
+    // their gamemode and place, gets the narrowest protection that stops the
+    // situation from hurting them, and everything expires on its own. Never
+    // parks anyone in spectator, because nothing would ever take them out.
+    private void protectInPlace(Player player, FlightSnapshot snapshot, boolean originalInvulnerable) {
 
-        if (unsafe && originalGamemode != GameMode.CREATIVE && originalGamemode != GameMode.SPECTATOR) {
+        // A flyer is given back the flight they already had, as a loan the
+        // flight service revokes on landing, rather than being left to fall.
+        if (snapshot != null && flightRestorer != null)
+            flightRestorer.loanFlight(player);
 
-            player.setGameMode(GameMode.SPECTATOR);
-            player.setFallDistance(0.0F);
+        fallProtection.grant(player);
+        player.setFallDistance(0.0F);
+        player.setInvulnerable(true);
 
-        }
+        int graceSeconds = plugin.getConfig().getInt("login-safety.failed-rescue-grace-seconds", DEFAULT_GRACE_SECONDS);
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+
+            if (player.isOnline())
+                player.setInvulnerable(originalInvulnerable);
+
+        }, graceSeconds * 20L);
 
     }
 
@@ -359,15 +460,6 @@ public final class LoginMigrationService {
     private boolean isManagedWorld(Player player) {
 
         return managedWorlds.contains(player.getWorld());
-
-    }
-
-    private boolean isStaff(Player player) {
-
-        List<String> permissions = plugin.getConfig().getStringList("login-safety.staff-bypass-permissions");
-        if (permissions.isEmpty())
-            permissions = DEFAULT_STAFF_PERMISSIONS;
-        return permissions.stream().anyMatch(player::hasPermission);
 
     }
 
@@ -392,9 +484,11 @@ public final class LoginMigrationService {
 
     }
 
+    // snapshot is non-null only for an airborne rescue, and then carries the
+    // state the quit captured; the original* fields describe the same moment.
     private record PendingLogin(boolean originalInvulnerable, boolean originalAllowFlight, boolean originalFlying,
             GameMode originalGamemode, Location originalLocation, boolean normalizeGamemode, boolean autopsyMigration,
-            LocationSafety.Issue safetyIssue)
+            LocationSafety.Issue safetyIssue, FlightSnapshot snapshot)
     {
 
         boolean unsafe() {

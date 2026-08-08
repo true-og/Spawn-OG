@@ -16,6 +16,8 @@ login-safety:
   # Return every non-survival login to survival unless the player is exempt below.
   normalize-non-staff-gamemode: true
   remove-flight-on-normalize: true
+  # Seconds of invulnerability when a rescue cannot run, so a failure never leaves a player stuck or dead.
+  failed-rescue-grace-seconds: 30
   # Fallback rules, used only when GameModeInventories-OG is absent: it is the
   # authority on gamemodes and Spawn-OG asks it first. Holding one of these keeps
   # a creative or spectator login, and only inside the creative regions below (or
@@ -32,34 +34,40 @@ login-safety:
   # list is what counts.
   creative-regions:
     - spawn
-  # LuckPerms-backed permissions. Matching any entry exempts a player from
-  # autopsy migration, so a staff spectator is never recorded as an OG:SMP
-  # autopsy. Gamemode normalization is governed by the exemptions above.
-  staff-bypass-permissions:
-    - spawnog.login-migration.bypass
-    - staffog.seebroadcast
-    - chat-og.staff
-    - sv.use
+  # Holders of spawnog.login-migration.bypass resume flight in place on relog when
+  # still permitted to fly there, and are exempt from autopsy migration.
 flight:
   enabled: true
   regions:
     spawn: fly
     warzone: nofly
+spawnback:
+  # Seconds the second /spawnback has to arrive after the warning.
+  confirm-seconds: 30
 locale:
   # <seconds> is replaced with the teleport warmup length.
   spawnWarmup: "<gold>Teleporting to spawn in <red><seconds> seconds...</red></gold>"
   # Movement cancels the warmup. Taking damage does not.
   spawnCancelled: "<red>Teleport to spawn cancelled because you moved.</red>"
+  missingPermission: "<red>You are lacking the required permissions.</red>"
   unsafeLogin: "<gold>You logged in at an unsafe location (<red><x>, <y>, <z></red> in <world>) and were teleported to spawn.</gold>"
+  # Sent to a player rescued to spawn because they logged out mid-flight.
+  flyingRescue: "<gold>You logged out mid-flight at <red><x>, <y>, <z></red> in <world> and were brought to spawn.</gold>"
+  # Sent when a bypass holder's flight is resumed in place instead of a rescue.
+  flightResumed: "<gold>Welcome back. Your flight was resumed where you left.</gold>"
   autopsyMigration: "<gold>Your OG:SMP autopsy state was safely migrated from <red><x>, <y>, <z></red> in <world>. You were moved to spawn and returned to survival.</gold>"
   gamemodeNormalized: "<gold>Your login gamemode was safely returned to survival.</gold>"
   loginSafetyFailed: "<red>Your login safety migration could not finish safely. Please contact staff.</red>"
   returnAvailable: "<gold>Run <click:run_command:'/spawnback'><hover:show_text:'<gold>Click to run <red>/spawnback</red></gold>'><red>/spawnback</red></hover></click> if you want to go back there anyway.</gold>"
-  # <reason> explains why the location was flagged. <seconds> is the confirmation window.
-  returnWarning: "<gold>You were moved from <red><x>, <y>, <z></red> in <world> because <red><reason></red>. Run <click:run_command:'/spawnback confirm'><hover:show_text:'<gold>Click to confirm your return</gold>'><red>/spawnback confirm</red></hover></click> within <seconds> seconds to go back anyway; you may take damage or die.</gold>"
-  returnConfirmed: "<gold>Returning you to <red><x>, <y>, <z></red> in <world>. Good luck.</gold>"
-  # Sent when the return point forbids flight, or the player may not fly there.
-  # Fall damage is cancelled on every return regardless.
+  # Sent when the return record could not be written after a rescue.
+  returnRecordFailed: "<red>Your way back could not be saved. Staff have been notified.</red>"
+  # First /spawnback. <reason> explains the rescue, <seconds> is the confirmation window.
+  spawnbackWarning: "<gold>You were moved from <red><x>, <y>, <z></red> in <world> because <red><reason></red>. Run <click:run_command:'/spawnback'><hover:show_text:'<gold>Click to run <red>/spawnback</red> again</gold>'><red>/spawnback</red></hover></click> again within <seconds> seconds to go back anyway; you may take damage or die.</gold>"
+  # Appended to the warning when the player's flight cannot be restored there.
+  spawnbackFallWarning: "<gold>You can no longer fly there, so you will fall; a one-time fall protection will cover the landing.</gold>"
+  spawnbackExecuted: "<gold>Returning you to <red><x>, <y>, <z></red> in <world>. Good luck.</gold>"
+  # Sent when the return point forbids the player's prior mode of flight.
+  # Fall damage is cancelled once on any return that restores no flight.
   returnFlightDenied: "<gold>You don't have the authority to fly here.</gold>"
   returnNone: "<red>You have no location to return to.</red>"
   returnWorldMissing: "<red>The world you were in (<world>) is not loaded, so you cannot return there.</red>"

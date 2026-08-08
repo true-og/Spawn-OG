@@ -8,6 +8,7 @@ import org.bukkit.Location;
 import org.bukkit.World;
 
 import spawnog.SpawnOG;
+import spawnog.flight.FlightMode;
 
 // Remembers where a player stood before Spawn-OG pulled them to spawn, so they
 // can walk it back with /spawnback even though the position was flagged unsafe.
@@ -20,6 +21,10 @@ import spawnog.SpawnOG;
 // every other player's record down with it.
 public final class ReturnLocationStore extends YamlStore {
 
+    // Token for records written before tokens existed, so their pending
+    // confirmation still keys against something stable.
+    private static final String LEGACY_TOKEN = "legacy";
+
     public ReturnLocationStore(SpawnOG plugin) {
 
         super(plugin, "return-locations.yml");
@@ -27,7 +32,7 @@ public final class ReturnLocationStore extends YamlStore {
     }
 
     public boolean record(UUID playerId, String playerName, Location location, String reason, GameMode gamemode,
-            boolean allowFlight, boolean flying)
+            boolean allowFlight, boolean flying, FlightMode mode)
     {
 
         if (location == null || location.getWorld() == null)
@@ -37,16 +42,19 @@ public final class ReturnLocationStore extends YamlStore {
         data.set(path + ".player-name", playerName);
         data.set(path + ".recorded-at", Instant.now().toString());
         data.set(path + ".reason", reason);
+        // Fresh per record, so a /spawnback warning issued for an older rescue
+        // can never confirm a newer one the player was not shown.
+        data.set(path + ".token", UUID.randomUUID().toString());
         data.set(path + ".location.world", location.getWorld().getName());
         data.set(path + ".location.x", location.getX());
         data.set(path + ".location.y", location.getY());
         data.set(path + ".location.z", location.getZ());
         data.set(path + ".location.yaw", location.getYaw());
         data.set(path + ".location.pitch", location.getPitch());
-        // Flight state from before the migration touched it. Only the airborne
-        // flag decides whether the return teleport resumes flight; the gamemode
-        // and the ability are written so staff reading this file can see what a
-        // player actually lost, not to be replayed onto them.
+        // The mode of flight decides what /spawnback hands back; the raw
+        // gamemode and ability are kept alongside so staff reading this file
+        // can see what a player actually lost.
+        data.set(path + ".mode", mode == null ? FlightMode.NONE.name() : mode.name());
         data.set(path + ".gamemode", gamemode == null ? null : gamemode.name());
         data.set(path + ".allow-flight", allowFlight);
         data.set(path + ".flying", flying);
@@ -81,12 +89,31 @@ public final class ReturnLocationStore extends YamlStore {
                 data.getDouble(path + ".location.y"), data.getDouble(path + ".location.z"),
                 (float) data.getDouble(path + ".location.yaw"), (float) data.getDouble(path + ".location.pitch"));
 
-        // Records written before flight state was stored read as false, which
-        // matches the old behavior of never resuming flight. Their gamemode
-        // reads as null, which no longer changes the outcome.
+        // Records written before modes were stored read as NONE, which matches
+        // the old behavior of never restoring flight.
         return new ReturnPoint(location, data.getString(path + ".reason", "it was flagged unsafe"), world.getName(),
                 gamemode(path), data.getBoolean(path + ".allow-flight", false),
-                data.getBoolean(path + ".flying", false));
+                data.getBoolean(path + ".flying", false), mode(path), data.getString(path + ".token", LEGACY_TOKEN));
+
+    }
+
+    // NONE when the record predates modes or names one this build no longer
+    // has, so an unreadable value never turns into a flight grant.
+    private FlightMode mode(String path) {
+
+        String recorded = data.getString(path + ".mode");
+        if (recorded == null)
+            return FlightMode.NONE;
+
+        try {
+
+            return FlightMode.valueOf(recorded);
+
+        } catch (IllegalArgumentException error) {
+
+            return FlightMode.NONE;
+
+        }
 
     }
 
@@ -133,11 +160,11 @@ public final class ReturnLocationStore extends YamlStore {
 
     }
 
-    // gamemode is the one the player held before the migration, or null when the
-    // record cannot say. It and allowFlight are kept for diagnosis: /spawnback
-    // decides what flight to hand back from the return point, not from these.
+    // mode is what /spawnback restores; gamemode and allowFlight are the raw
+    // pre-migration state, kept for diagnosis. token identifies this record so
+    // a warning and its confirmation are known to speak about the same rescue.
     public record ReturnPoint(Location location, String reason, String worldName, GameMode gamemode,
-            boolean allowFlight, boolean flying)
+            boolean allowFlight, boolean flying, FlightMode mode, String token)
     {
     }
 

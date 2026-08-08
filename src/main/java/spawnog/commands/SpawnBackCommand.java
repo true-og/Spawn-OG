@@ -1,8 +1,6 @@
 package spawnog.commands;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import net.kyori.adventure.text.Component;
@@ -22,37 +20,36 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import spawnog.SpawnOG;
-import spawnog.flight.RegionFlightService;
+import spawnog.flight.FlightMode;
+import spawnog.flight.FlightRestorer;
 import spawnog.login.LoginMigrationService;
 import spawnog.login.ReturnLocationStore;
 import spawnog.login.ReturnLocationStore.ReturnPoint;
 import spawnog.teleport.FallProtection;
 
 // Sends a player back to wherever a login safety migration took them from. The
-// position is knowingly unsafe, so the first call only warns and the teleport
-// waits for an explicit confirmation.
+// position is knowingly unsafe, so the first /spawnback only warns and the
+// second one within the window executes; there is no subcommand.
 public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Listener {
 
-    private static final int CONFIRM_SECONDS = 30;
+    private static final int DEFAULT_CONFIRM_SECONDS = 30;
 
     private final SpawnOG plugin;
     private final ReturnLocationStore returnLocationStore;
     private final LoginMigrationService loginMigrationService;
-    // Null when regional flight management is disabled or WorldGuard is absent.
-    private final RegionFlightService regionFlightService;
+    private final FlightRestorer flightRestorer;
     private final FallProtection fallProtection;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
-    private final Map<UUID, Long> pendingConfirmations = new HashMap<>();
+    private final PendingConfirmations pendingConfirmations = new PendingConfirmations(System::currentTimeMillis);
 
     public SpawnBackCommand(SpawnOG plugin, ReturnLocationStore returnLocationStore,
-            LoginMigrationService loginMigrationService, RegionFlightService regionFlightService,
-            FallProtection fallProtection)
+            LoginMigrationService loginMigrationService, FlightRestorer flightRestorer, FallProtection fallProtection)
     {
 
         this.plugin = plugin;
         this.returnLocationStore = returnLocationStore;
         this.loginMigrationService = loginMigrationService;
-        this.regionFlightService = regionFlightService;
+        this.flightRestorer = flightRestorer;
         this.fallProtection = fallProtection;
 
     }
@@ -94,23 +91,26 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
             else
                 send(player, "locale.returnNone", "<red>You have no location to return to.</red>");
 
-            pendingConfirmations.remove(playerId);
+            pendingConfirmations.clear(playerId);
             return true;
 
         }
 
-        if (!isConfirmed(player, args)) {
+        int confirmSeconds = plugin.getConfig().getInt("spawnback.confirm-seconds", DEFAULT_CONFIRM_SECONDS);
+        if (!pendingConfirmations.confirm(playerId, point.token(), confirmSeconds * 1000L)) {
 
-            pendingConfirmations.put(playerId, System.currentTimeMillis() + CONFIRM_SECONDS * 1000L);
-            send(player, "locale.returnWarning",
-                    "<gold>You were moved from <red><x>, <y>, <z></red> in <world> because <red><reason></red>. Run <click:run_command:'/spawnback confirm'><hover:show_text:'<gold>Click to confirm your return</gold>'><red>/spawnback confirm</red></hover></click> within <seconds> seconds to go back anyway; you may take damage or die.</gold>",
+            send(player, "locale.spawnbackWarning",
+                    "<gold>You were moved from <red><x>, <y>, <z></red> in <world> because <red><reason></red>. Run <click:run_command:'/spawnback'><hover:show_text:'<gold>Click to run <red>/spawnback</red> again</gold>'><red>/spawnback</red></hover></click> again within <seconds> seconds to go back anyway; you may take damage or die.</gold>",
                     coordinates(point), Placeholder.unparsed("reason", point.reason()),
-                    Placeholder.unparsed("seconds", String.valueOf(CONFIRM_SECONDS)));
+                    Placeholder.unparsed("seconds", String.valueOf(confirmSeconds)));
+            // A flyer headed for a spot that no longer permits their flight is
+            // told about the drop before they commit to it.
+            if (point.mode() != FlightMode.NONE && !flightRestorer.canRestore(point.mode(), player, point.location()))
+                send(player, "locale.spawnbackFallWarning",
+                        "<gold>You can no longer fly there, so you will fall; a one-time fall protection will cover the landing.</gold>");
             return true;
 
         }
-
-        pendingConfirmations.remove(playerId);
 
         // The record is only consumed once the player is actually standing there
         // again, so a failed teleport does not cost them the way back.
@@ -128,13 +128,22 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
                 }
 
+                // Re-checked live at the destination: a permission or region
+                // right lost since the warning means protection, not flight.
+                boolean restored = flightRestorer.restore(point.mode(), player);
+                if (!restored) {
+
+                    fallProtection.grant(player);
+                    if (point.mode() != FlightMode.NONE)
+                        send(player, "locale.returnFlightDenied",
+                                "<gold>You don't have the authority to fly here.</gold>");
+
+                }
+
+                // Cleared only after the restore attempt, so the one-shot record
+                // is never burned before its flight decision has been made.
                 returnLocationStore.clear(playerId);
-                // Cushions the landing for everyone, at every destination, and
-                // whether or not flight could be restored: Spawn-OG is the
-                // reason the player is not standing where they left off.
-                fallProtection.grant(player);
-                restoreFlight(player, point);
-                send(player, "locale.returnConfirmed",
+                send(player, "locale.spawnbackExecuted",
                         "<gold>Returning you to <red><x>, <y>, <z></red> in <world>. Good luck.</gold>",
                         coordinates(point));
 
@@ -146,51 +155,11 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
     }
 
-    // The migration strips flight before /spawnback can ever observe it, so the
-    // record carries the pre-migration state: a player who was airborne is put
-    // back into the air instead of being dropped from the sky.
-    //
-    // Which flight they get is decided at the return point, never copied out of
-    // the record. GameModeInventories-OG and NoClip-OG only ever set a gamemode
-    // and let the server derive the ability from it, so a player normalized out
-    // of creative or spectator has no ability of their own left to resume. The
-    // regional service stands in with the narrowest flight that covers the
-    // descent: a tracked grant inside a fly region, a loan revoked on landing
-    // anywhere else. Neither outlives the fall, so refusing to help would only
-    // drop the player from the height that got them rescued.
-    private void restoreFlight(Player player, ReturnPoint point) {
-
-        if (!point.flying())
-            return;
-
-        // Without regional flight management there is no authority to grant
-        // anything, so only an ability the player still holds can be resumed.
-        if (regionFlightService == null) {
-
-            if (player.getAllowFlight()) {
-
-                player.setFlying(true);
-                return;
-
-            }
-
-        } else if (regionFlightService.resumeFlight(player)) {
-
-            return;
-
-        }
-
-        send(player, "locale.returnFlightDenied", "<gold>You don't have the authority to fly here.</gold>");
-
-    }
-
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command cmd,
             @NotNull String lbl, @NotNull String[] args)
     {
 
-        if (args.length == 1 && "confirm".startsWith(args[0].toLowerCase()))
-            return List.of("confirm");
         return List.of();
 
     }
@@ -198,16 +167,7 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
 
-        pendingConfirmations.remove(event.getPlayer().getUniqueId());
-
-    }
-
-    private boolean isConfirmed(Player player, String[] args) {
-
-        Long expiry = pendingConfirmations.get(player.getUniqueId());
-        if (expiry == null || expiry < System.currentTimeMillis())
-            return false;
-        return args.length > 0 && args[0].equalsIgnoreCase("confirm");
+        pendingConfirmations.clear(event.getPlayer().getUniqueId());
 
     }
 

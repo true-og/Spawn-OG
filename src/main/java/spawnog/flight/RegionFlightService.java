@@ -21,7 +21,6 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
@@ -52,7 +51,6 @@ public final class RegionFlightService implements Listener {
     private final SpawnOG plugin;
     private final LoginMigrationService loginMigrationService;
     private final FlightIntentStore flightIntentStore;
-    private final AirborneQuitStore airborneQuitStore;
     private final FallProtection fallProtection;
     private final Map<String, RuleKind> regionRules = new HashMap<>();
     private final Map<UUID, FlightOverride> flightOverrides = new HashMap<>();
@@ -65,13 +63,12 @@ public final class RegionFlightService implements Listener {
     private int particleStep;
 
     public RegionFlightService(SpawnOG plugin, LoginMigrationService loginMigrationService,
-            FlightIntentStore flightIntentStore, AirborneQuitStore airborneQuitStore, FallProtection fallProtection)
+            FlightIntentStore flightIntentStore, FallProtection fallProtection)
     {
 
         this.plugin = plugin;
         this.loginMigrationService = loginMigrationService;
         this.flightIntentStore = flightIntentStore;
-        this.airborneQuitStore = airborneQuitStore;
         this.fallProtection = fallProtection;
         loginMigrationService.addCompletionListener(this::scheduleRefresh);
         loadRules();
@@ -203,7 +200,16 @@ public final class RegionFlightService implements Listener {
 
     public void refresh(Player player) {
 
-        if (player == null || !player.isOnline())
+        refresh(player, player == null ? null : player.getLocation());
+
+    }
+
+    // Evaluates the rules at an explicit position, because during a move or
+    // teleport event the player entity still reports the pre-move location and
+    // judging there would leave the rules one step behind at region borders.
+    public void refresh(Player player, org.bukkit.Location at) {
+
+        if (player == null || !player.isOnline() || at == null)
             return;
         // While a login migration is in flight, do not reschedule: the completion
         // listener registered in the constructor refreshes once it resolves.
@@ -213,14 +219,14 @@ public final class RegionFlightService implements Listener {
             return;
 
         UUID playerId = player.getUniqueId();
-        RegionRule rule = currentRule(player);
+        RegionRule rule = ruleAt(at);
 
         // The landing loan ends once the player is down, and at once inside a
         // region that denies them flight. Revoked before the branches below read
         // the ability, so a nofly region records the player's own flight state
         // as the original rather than the loan and cannot hand it back later.
-        if (landingGrants.contains(playerId)
-                && (isOnSafeSurface(player) || rule != null && rule.kind() == RuleKind.NOFLY && !hasBypass(player)))
+        if (landingGrants.contains(playerId) && (LocationSafety.isSupported(at)
+                || rule != null && rule.kind() == RuleKind.NOFLY && !hasBypass(player)))
             revokeLandingGrant(player);
 
         FlightOverride previous = flightOverrides.get(playerId);
@@ -283,9 +289,7 @@ public final class RegionFlightService implements Listener {
             previous = new FlightOverride(player.getAllowFlight(), false, rule.regionId(), RuleKind.NOFLY);
             flightOverrides.put(playerId, previous);
 
-        } else if (previous != null && previous.kind() == RuleKind.NOFLY
-                && !previous.regionId().equals(rule.regionId()))
-        {
+        } else if (previous.kind() == RuleKind.NOFLY && !previous.regionId().equals(rule.regionId())) {
 
             flightOverrides.put(playerId,
                     new FlightOverride(previous.originalAllowFlight(), false, rule.regionId(), RuleKind.NOFLY));
@@ -306,20 +310,13 @@ public final class RegionFlightService implements Listener {
         if (player == null)
             return;
 
-        // Read before the revoke. Taking the grant back takes the airborne state
-        // with it, and the player's saved abilities are the only thing the next
-        // login can consult, so the fact has to be written down somewhere else.
-        boolean wasFlying = player.isFlying();
-
-        // Before the override, so a loan is never mistaken for an ability the
-        // player owned and written back into their saved abilities on quit.
+        // The airborne evidence is FlightQuitListener's snapshot, captured at
+        // LOWEST before this runs, so grounding here loses nothing.
+        //
+        // The loan before the override, so a loan is never mistaken for an
+        // ability the player owned and written back into their saved abilities.
         revokeLandingGrant(player);
         restoreOverride(player, flightOverrides.get(player.getUniqueId()));
-
-        // Only when this call is what grounded them: a creative flyer keeps
-        // flying through it and has nothing for the next login to recover.
-        if (wasFlying && !player.isFlying())
-            airborneQuitStore.record(player);
 
     }
 
@@ -383,20 +380,18 @@ public final class RegionFlightService implements Listener {
                 && event.getFrom().getBlockX() == event.getTo().getBlockX()
                 && event.getFrom().getBlockY() == event.getTo().getBlockY()
                 && event.getFrom().getBlockZ() == event.getTo().getBlockZ();
+        // Judged where the player is going, not where they still stand: this
+        // also covers teleports, since PlayerTeleportEvent extends move.
         if (!sameBlock)
-            refresh(player);
+            refresh(player, event.getTo());
 
     }
 
+    // No PlayerKickEvent handler on purpose: a kick fires before the quit event
+    // that FlightQuitListener snapshots from, so grounding a kicked player early
+    // would erase the airborne evidence. The quit event always follows.
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-
-        restore(event.getPlayer());
-
-    }
-
-    @EventHandler
-    public void onKick(PlayerKickEvent event) {
 
         restore(event.getPlayer());
 
@@ -432,19 +427,37 @@ public final class RegionFlightService implements Listener {
 
     }
 
-    // Whether refresh() will re-arm flight for the player at the location: a
-    // stored intent, flight permission, and a fly rule all present. Login safety
-    // asks this before rescuing an airborne player, because a flyer who gets
-    // their wings back in place has nothing to be rescued from.
-    public boolean willResumeFlightAt(Player player, org.bukkit.Location location) {
+    // Grants regional flight to a player standing inside a fly region they hold
+    // permission for, recording the grant and the intent so it is revoked and
+    // re-armed like any /fly toggle. The restore path for a rescued /fly flyer.
+    public boolean grantRegionFlight(Player player) {
 
-        if (player == null || location == null)
-            return false;
-        if (!flightIntentStore.contains(player.getUniqueId()) || !hasFlightPermission(player))
+        if (player == null || !player.isOnline() || !hasFlightPermission(player))
             return false;
 
-        RegionRule rule = ruleAt(location);
-        return rule != null && rule.kind() == RuleKind.FLY;
+        RegionRule rule = currentRule(player);
+        if (rule == null || rule.kind() != RuleKind.FLY)
+            return false;
+
+        if (!player.getAllowFlight()) {
+
+            player.setAllowFlight(true);
+            flightOverrides.put(player.getUniqueId(), new FlightOverride(false, true, rule.regionId(), RuleKind.FLY));
+
+        }
+
+        player.setFlying(true);
+        flightIntentStore.record(player);
+        return true;
+
+    }
+
+    // The rule governing a location, or null when no configured region covers
+    // it. Published so the restore matrix can judge a /spawnback destination.
+    public RuleKind ruleKindAt(org.bukkit.Location location) {
+
+        RegionRule rule = location == null ? null : ruleAt(location);
+        return rule == null ? null : rule.kind();
 
     }
 
@@ -457,16 +470,18 @@ public final class RegionFlightService implements Listener {
             return;
 
         // Another authority (creative mode, a bypass, another plugin) already
-        // allows flight; there is nothing to arm and no override to track.
-        if (player.getAllowFlight())
-            return;
+        // allows flight, so there is no override to track; but an airborne
+        // player still needs the flying flag itself put back.
+        if (!player.getAllowFlight()) {
 
-        player.setAllowFlight(true);
-        flightOverrides.put(player.getUniqueId(), new FlightOverride(false, true, rule.regionId(), RuleKind.FLY));
+            player.setAllowFlight(true);
+            flightOverrides.put(player.getUniqueId(), new FlightOverride(false, true, rule.regionId(), RuleKind.FLY));
+
+        }
 
         // A player re-armed in mid-air relogged while flying and is already
         // falling, so put them back into flight instead of letting them drop.
-        if (!isOnSafeSurface(player))
+        if (!player.isFlying() && !isOnSafeSurface(player))
             player.setFlying(true);
 
     }
@@ -503,13 +518,13 @@ public final class RegionFlightService implements Listener {
 
     }
 
-    private boolean hasBypass(Player player) {
+    public boolean hasBypass(Player player) {
 
         return player.hasPermission(BYPASS_PERMISSION) || player.hasPermission(LEGACY_BYPASS_PERMISSION);
 
     }
 
-    private boolean hasFlightPermission(Player player) {
+    public boolean hasFlightPermission(Player player) {
 
         return player.hasPermission(FLIGHT_PERMISSION) || player.hasPermission(LEGACY_FLIGHT_PERMISSION);
 
@@ -630,7 +645,7 @@ public final class RegionFlightService implements Listener {
 
     }
 
-    private enum RuleKind {
+    public enum RuleKind {
         FLY, NOFLY
     }
 

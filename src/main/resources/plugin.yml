@@ -5,7 +5,7 @@ api-version: '${apiVersion}'
 authors: [ kasumabalidps, NotAlexNoyle ]
 website: https://github.com/true-og/Spawn-OG
 main: spawnog.SpawnOG
-softdepend: [LuckPerms, WorldEdit, WorldGuard, GameModeInventories-OG, MyWorlds, My_Worlds]
+softdepend: [LuckPerms, WorldEdit, WorldGuard, GameModeInventories-OG, NoClip-OG, MyWorlds, My_Worlds]
 loadbefore: [Essentials, Essentials-OG]
 commands:
   spawn:
@@ -18,7 +18,7 @@ commands:
     permission: spawnog.setspawn
   spawnback:
     description: Return to the location a login safety migration moved you from
-    usage: /spawnback [confirm]
+    usage: /spawnback
     permission: spawnog.spawnback
   fly:
     description: Toggle flight inside a WorldGuard region configured to allow it
@@ -38,7 +38,7 @@ permissions:
     description: Use /spawnback to return to a location a login safety migration moved you from
     default: true
   spawnog.login-migration.bypass:
-    description: Exempt a staff member from autopsy migration; gamemode normalization still applies
+    description: Resume flight in place on relog when still permitted there; exempt from autopsy migration
     default: false
   spawnog.flight:
     description: Use /fly inside regions configured to allow flight

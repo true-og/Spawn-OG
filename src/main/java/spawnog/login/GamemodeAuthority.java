@@ -14,4 +14,14 @@ public interface GamemodeAuthority {
     // so the caller falls back.
     Boolean mayUse(Player player, GameMode gamemode, Location location);
 
+    // Switches the player's gamemode through the authority's own machinery, so
+    // its side effects (inventory swaps, region-listener exemptions) apply.
+    // False when no authority is running or the switch was cancelled; Spawn-OG
+    // never sets a sanctioned gamemode behind the authority's back.
+    default boolean changeGameMode(Player player, GameMode gamemode) {
+
+        return false;
+
+    }
+
 }
