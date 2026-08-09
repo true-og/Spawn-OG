@@ -18,12 +18,9 @@ public enum FlightMode {
     // No flight to restore: a grounded rescue or a record predating modes.
     NONE;
 
-    // NoClip wins over the gamemode because /nc drives the gamemode itself: a
-    // noclipping player reads as creative or spectator depending on the tick.
-    // Survival flight only counts as FLY when the player had actually toggled
-    // /fly; flight without that intent (a landing loan, or a record whose
-    // gamemode is unreadable) is NONE, because /spawnback must never invent a
-    // /fly toggle the player did not make.
+    // NoClip wins because /nc drives the gamemode itself. Survival flight only
+    // counts as FLY when /fly was actually toggled; flight without that intent
+    // is NONE, so /spawnback never invents a toggle the player did not make.
     public static FlightMode classify(GameMode gamemode, boolean noclip, boolean flyIntent) {
 
         if (noclip)

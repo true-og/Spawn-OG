@@ -50,17 +50,31 @@ public final class GameModeInventoriesAuthority implements GamemodeAuthority {
     @Override
     public boolean changeGameMode(Player player, GameMode gamemode) {
 
-        // The plugin instance rather than the published policy, so the switch is
-        // flagged as plugin driven and the region listener skips its denial.
+        // Flagged as plugin driven so the region listener trusts the switch;
+        // callers pre-validate through mayUse before asking.
         org.bukkit.plugin.Plugin candidate = plugin.getServer().getPluginManager().getPlugin(PLUGIN_NAME);
         if (!(candidate instanceof me.eccentric_nz.gamemodeinventories.GameModeInventories gmi)
                 || !candidate.isEnabled())
+        {
+
+            plugin.getLogger().warning(PLUGIN_NAME + " is not available; cannot switch " + player.getName() + " to "
+                    + gamemode.name() + ".");
             return false;
+
+        }
 
         gmi.internalGameModeChange(player, gamemode);
         // Another plugin may cancel the underlying gamemode change event, so the
         // outcome is judged by what actually stuck.
-        return player.getGameMode() == gamemode;
+        if (player.getGameMode() != gamemode) {
+
+            plugin.getLogger().warning(PLUGIN_NAME + " attempted to switch " + player.getName() + " to "
+                    + gamemode.name() + " but the change did not stick; another plugin cancelled it.");
+            return false;
+
+        }
+
+        return true;
 
     }
 

@@ -80,13 +80,14 @@ public final class FlightRestorer {
 
     }
 
-    // The login bypass check: like canRestore, except a sanctioned spectator is
-    // left alone rather than refused, since spectators fly by nature and there
-    // is nothing to re-arm.
+    // Like canRestore, except a sanctioned spectator is left alone. Only a
+    // player still IN spectator qualifies: force-gamemode rewrites the mode
+    // between quit and login, and an ex-spectator takes the rescue instead.
     public boolean canResumeInPlace(FlightMode mode, Player player, Location location) {
 
         if (mode == FlightMode.SPECTATOR)
-            return gamemodePolicy.mayUse(player, GameMode.SPECTATOR, location);
+            return player.getGameMode() == GameMode.SPECTATOR
+                    && gamemodePolicy.mayUse(player, GameMode.SPECTATOR, location);
 
         return canRestore(mode, player, location);
 
@@ -132,15 +133,16 @@ public final class FlightRestorer {
 
     }
 
-    // Creative through the authority so the inventory swap runs, then the
-    // airborne flag: creative grants the ability, but not the state.
+    // Creative through the authority so the inventory swap runs. Ability then
+    // state are re-asserted, not trusted: an already-creative player skips the
+    // vanilla ability reset, and setFlying throws while allow-flight is off.
     private boolean restoreCreative(Player player) {
 
         if (!gamemodeAuthority.changeGameMode(player, GameMode.CREATIVE))
             return false;
 
-        if (player.getAllowFlight())
-            player.setFlying(true);
+        player.setAllowFlight(true);
+        player.setFlying(true);
         return true;
 
     }

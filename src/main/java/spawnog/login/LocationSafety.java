@@ -83,13 +83,9 @@ public final class LocationSafety {
 
     }
 
-    // The lowest position at or above the given one where a player appearing
-    // there is not suffocated or burned on arrival: both the feet and head
-    // blocks are non-occluding and free of contact hazards. Landing is
-    // deliberately not judged, because scanning upward can never shorten a
-    // drop; the caller covers falls with fall protection. Returns the input
-    // unchanged when it is already clear, and null when its world is missing
-    // or every position up to the build limit is blocked.
+    // The lowest position at or above the given one whose feet and head blocks
+    // neither suffocate nor burn on arrival. Landing is not judged: the caller
+    // covers falls. Null when the world is missing or the column is blocked.
     public static Location clearAbove(Location location) {
 
         if (location == null)

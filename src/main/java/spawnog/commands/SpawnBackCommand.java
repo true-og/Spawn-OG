@@ -113,11 +113,9 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
         }
 
-        // A plain return still teleports without touching gamemode or flight,
-        // but the spot itself may have been built over or buried since the
-        // rescue, so it is lifted to the nearest clear position above; falls
-        // stay covered by the fall protection granted below. Flight returns
-        // keep the exact spot: the flyer resumes in the air they left.
+        // A plain return may land in a spot built over since the rescue, so it
+        // is lifted to the nearest clear position above; fall protection below
+        // covers drops. Flight returns keep the exact spot they left mid-air.
         Location recorded = point.location().clone();
         Location destination = recorded;
         if (point.mode() == FlightMode.NONE) {

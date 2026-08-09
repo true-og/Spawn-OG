@@ -71,10 +71,7 @@ public final class LoginMigrationService {
         if (!plugin.getConfig().getBoolean("login-safety.enabled", true))
             return false;
 
-        // A player who left mid-flight is unsafe by definition, regardless of
-        // how safe the ground below looks: their flight was revoked on the way
-        // out and nothing has decided yet whether they get it back. A snapshot
-        // is only believed when the login it greets still looks like the quit
+        // A snapshot is only believed when the login still looks like the quit
         // it recorded; a mismatch, a minigame arena, or an unmanaged world
         // discards it on the spot so it can never ambush a later login.
         FlightSnapshot snapshot = flightSnapshotStore.peek(player.getUniqueId());
@@ -482,13 +479,9 @@ public final class LoginMigrationService {
 
     }
 
-    // Whether the player's live login state still looks like the quit the
-    // snapshot recorded: same spot, same gamemode, and still off the ground.
-    // Anything else means the snapshot describes an older session and must not
-    // drive a rescue or a flight-restoring return record. Live flight bits are
-    // not required on their own because RegionFlightService grounds /fly
-    // flyers on the way out after the snapshot is taken, so a genuine
-    // mid-flight quitter can relog with allow-flight off, hanging unsupported.
+    // Same spot and still off the ground, or the snapshot is stale. Gamemode
+    // equality is NOT required (force-gamemode rewrites quitters to survival),
+    // and live flight bits alone are not either (/fly is revoked on quit).
     private boolean corroborates(Player player, FlightSnapshot snapshot) {
 
         Location recorded = snapshot.location();
@@ -497,7 +490,7 @@ public final class LoginMigrationService {
             return false;
         if (recorded.distanceSquared(current) > SNAPSHOT_DISTANCE_SQUARED)
             return false;
-        if (snapshot.gamemode() == null || player.getGameMode() != snapshot.gamemode())
+        if (snapshot.gamemode() == null)
             return false;
 
         return player.isFlying() || player.getAllowFlight() || !LocationSafety.isSupported(current);

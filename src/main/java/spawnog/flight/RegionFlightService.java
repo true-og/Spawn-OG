@@ -15,6 +15,7 @@ import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import com.sk89q.worldguard.protection.regions.RegionQuery;
 import org.bukkit.Color;
+import org.bukkit.GameMode;
 import org.bukkit.Particle;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -217,6 +218,8 @@ public final class RegionFlightService implements Listener {
         // froze the server, because the migration could only resolve on a later tick.
         if (loginMigrationService.isPending(player))
             return;
+        if (releaseGamemodeFlyer(player))
+            return;
 
         UUID playerId = player.getUniqueId();
         RegionRule rule = ruleAt(at);
@@ -309,6 +312,8 @@ public final class RegionFlightService implements Listener {
 
         if (player == null)
             return;
+        if (releaseGamemodeFlyer(player))
+            return;
 
         // The airborne evidence is FlightQuitListener's snapshot, captured at
         // LOWEST before this runs, so grounding here loses nothing.
@@ -317,6 +322,21 @@ public final class RegionFlightService implements Listener {
         // ability the player owned and written back into their saved abilities.
         revokeLandingGrant(player);
         restoreOverride(player, flightOverrides.get(player.getUniqueId()));
+
+    }
+
+    // Creative and spectator flight is gamemode-derived and never regional:
+    // bookkeeping is dropped, not applied, so a stale override can neither
+    // ground a gamemode flyer nor leak a loaned ability back to survival.
+    private boolean releaseGamemodeFlyer(Player player) {
+
+        GameMode gamemode = player.getGameMode();
+        if (gamemode != GameMode.CREATIVE && gamemode != GameMode.SPECTATOR)
+            return false;
+
+        landingGrants.remove(player.getUniqueId());
+        flightOverrides.remove(player.getUniqueId());
+        return true;
 
     }
 
@@ -380,8 +400,9 @@ public final class RegionFlightService implements Listener {
                 && event.getFrom().getBlockX() == event.getTo().getBlockX()
                 && event.getFrom().getBlockY() == event.getTo().getBlockY()
                 && event.getFrom().getBlockZ() == event.getTo().getBlockZ();
-        // Judged where the player is going, not where they still stand: this
-        // also covers teleports, since PlayerTeleportEvent extends move.
+        // Judged where the player is going, not where they still stand.
+        // Teleports never reach this handler (PlayerTeleportEvent has its own
+        // HandlerList); onTeleport's scheduled refresh covers them instead.
         if (!sameBlock)
             refresh(player, event.getTo());
 

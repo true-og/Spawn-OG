@@ -114,10 +114,9 @@ public final class FlightSnapshotStore extends YamlStore {
 
     }
 
-    // gamemode and location may be null for records written by older builds or
-    // pointing at unloaded worlds; mode() tolerates both. An absent fly-intent
-    // reads false, so a doctored or truncated record classifies as NONE, never
-    // as a /fly grant the player did not have.
+    // gamemode and location may be null for older or unloaded-world records;
+    // mode() tolerates both. An absent fly-intent reads false, so a truncated
+    // record classifies as NONE, never as a /fly grant the player lacked.
     public record FlightSnapshot(GameMode gamemode, Location location, boolean allowFlight, boolean flying,
             boolean noclip, boolean flyIntent)
     {
