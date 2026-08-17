@@ -88,7 +88,7 @@ public final class SpawnOG extends JavaPlugin {
         GamemodeAuthority gamemodeAuthority = GameModeInventoriesAuthority.find(this);
         GamemodePolicy gamemodePolicy = new GamemodePolicy(this, regionLookup(), gamemodeAuthority);
         loginMigrationService = new LoginMigrationService(this, migrationStore, returnLocationStore,
-                flightSnapshotStore, gamemodePolicy, managedWorlds, fallProtection);
+                flightSnapshotStore, gamemodePolicy, gamemodeAuthority, managedWorlds, fallProtection);
         getServer().getPluginManager().registerEvents(new SpawnListener(this, loginMigrationService, managedWorlds),
                 this);
 

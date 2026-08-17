@@ -72,9 +72,8 @@ public class SpawnListener implements Listener {
         Player p = e.getPlayer();
         Location destination = preferred(p, e);
 
-        // Bed, home, and configured spawn all keep their say, but only inside
-        // the worlds Spawn-OG governs. A bed left in a minigame world, or a
-        // death in one, would otherwise respawn the player outside the SMP.
+        // Bed, home, and configured spawn keep their say only inside governed
+        // worlds; a minigame bed or death must not respawn the player outside the SMP.
         if (!managedWorlds.contains(destination == null ? null : destination.getWorld()))
             destination = lastManagedSpawn(p);
 
@@ -83,9 +82,8 @@ public class SpawnListener implements Listener {
 
     }
 
-    // Where the player would land without the managed-world guarantee: their bed
-    // if the server found one usable, then their Essentials home, then the
-    // configured spawn.
+    // Without the managed-world guarantee: usable bed first, then Essentials
+    // home, then the configured spawn.
     private Location preferred(Player p, PlayerRespawnEvent e) {
 
         boolean atHome = plugin.getConfig().getBoolean("respawn-at-home", true);

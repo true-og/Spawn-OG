@@ -10,15 +10,8 @@ import org.bukkit.World;
 import spawnog.SpawnOG;
 import spawnog.flight.FlightMode;
 
-// Remembers where a player stood before Spawn-OG pulled them to spawn, so they
-// can walk it back with /spawnback even though the position was flagged unsafe.
-// Persisted, because players usually read the migration message a session or
-// two later.
-//
-// <p>
-// Coordinates are stored as plain numbers rather than serialized Locations:
-// deserializing a Location whose world is unloaded throws, and that would take
-// every other player's record down with it.
+// Remembers where a player stood before a rescue so /spawnback can walk it
+// back. Plain numbers, not Locations: an unloaded world would throw on load.
 public final class ReturnLocationStore extends YamlStore {
 
     // Token for records written before tokens existed, so their pending
@@ -51,9 +44,8 @@ public final class ReturnLocationStore extends YamlStore {
         data.set(path + ".location.z", location.getZ());
         data.set(path + ".location.yaw", location.getYaw());
         data.set(path + ".location.pitch", location.getPitch());
-        // The mode of flight decides what /spawnback hands back; the raw
-        // gamemode and ability are kept alongside so staff reading this file
-        // can see what a player actually lost.
+        // The mode decides what /spawnback hands back; raw gamemode and ability
+        // are kept alongside so staff can see what a player actually lost.
         data.set(path + ".mode", mode == null ? FlightMode.NONE.name() : mode.name());
         data.set(path + ".gamemode", gamemode == null ? null : gamemode.name());
         data.set(path + ".allow-flight", allowFlight);
@@ -160,9 +152,8 @@ public final class ReturnLocationStore extends YamlStore {
 
     }
 
-    // mode is what /spawnback restores; gamemode and allowFlight are the raw
-    // pre-migration state, kept for diagnosis. token identifies this record so
-    // a warning and its confirmation are known to speak about the same rescue.
+    // mode is what /spawnback restores; gamemode/allowFlight are diagnostic.
+    // token ties a warning and its confirmation to the same rescue.
     public record ReturnPoint(Location location, String reason, String worldName, GameMode gamemode,
             boolean allowFlight, boolean flying, FlightMode mode, String token)
     {

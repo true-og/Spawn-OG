@@ -9,10 +9,8 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 
-// Decides whether a login location would hurt or kill the player who logs in
-// there. The bar is deliberately low: only positions that damage the player on
-// arrival count as unsafe. Standing in water, tall grass, on a slab, or on any
-// other block that is not a full cube is normal survival play and stays safe.
+// Judges whether a login spot would hurt the player on arrival. The bar is low
+// on purpose: water, grass, slabs, and other partial blocks all stay safe.
 public final class LocationSafety {
 
     // A drop this long or shorter is survivable, so a player suspended above one is
@@ -64,9 +62,8 @@ public final class LocationSafety {
 
     }
 
-    // Whether something underfoot will hold the player: ground, a block they are
-    // standing on, or liquid. Tells a finished landing from a fall still in
-    // progress, which is when a granted fall protection is no longer owed.
+    // Whether something underfoot holds the player (ground or liquid), telling
+    // a finished landing, when protection is no longer owed, from a live fall.
     public static boolean isSupported(Location feet) {
 
         if (feet == null)
@@ -83,9 +80,8 @@ public final class LocationSafety {
 
     }
 
-    // The lowest position at or above the given one whose feet and head blocks
-    // neither suffocate nor burn on arrival. Landing is not judged: the caller
-    // covers falls. Null when the world is missing or the column is blocked.
+    // The lowest position at or above the given one that neither suffocates nor
+    // burns. Landing is not judged (caller covers falls); null when blocked.
     public static Location clearAbove(Location location) {
 
         if (location == null)

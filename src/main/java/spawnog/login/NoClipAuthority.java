@@ -7,9 +7,8 @@ import org.bukkit.entity.Player;
 import plugin.NoClip;
 import spawnog.SpawnOG;
 
-// NoClip-OG's manager, reached as a direct compile-time dependency on the
-// submodule under libs/. Only constructed when that plugin is enabled, so its
-// classes are never resolved on servers running without it.
+// NoClip-OG's manager, a compile-time dependency on the submodule under libs/.
+// Only constructed when enabled, so its classes never resolve without it.
 public final class NoClipAuthority {
 
     public static final String PLUGIN_NAME = "NoClip-OG";

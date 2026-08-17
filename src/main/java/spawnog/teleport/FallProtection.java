@@ -15,11 +15,8 @@ import org.bukkit.event.player.PlayerQuitEvent;
 
 import spawnog.login.LocationSafety;
 
-// Cancels the next fall for a player Spawn-OG put in the air: a /spawnback
-// return, or a landing forced by taking flight away. Deliberately kept apart
-// from regional flight so the protection does not depend on the player's
-// permissions, on the rules of wherever they land, or on WorldGuard being
-// installed at all.
+// Cancels the next fall for a player Spawn-OG put in the air. Kept apart from
+// regional flight so it works without permissions, regions, or WorldGuard.
 public final class FallProtection implements Listener {
 
     private final Set<UUID> immune = new HashSet<>();
@@ -71,9 +68,8 @@ public final class FallProtection implements Listener {
 
     }
 
-    // MONITOR so this runs after the flight service's NORMAL quit handler,
-    // which re-grants immunity while grounding flyers; clearing first would
-    // leak the entry and gift a free fall on the player's next session.
+    // MONITOR: runs after the flight service's NORMAL quit handler, which
+    // re-grants immunity while grounding flyers; clearing first would leak it.
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent event) {
 

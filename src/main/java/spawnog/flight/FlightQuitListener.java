@@ -9,11 +9,8 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import spawnog.SpawnOG;
 import spawnog.login.NoClipAuthority;
 
-// Captures the flight snapshot on the way out. LOWEST so it reads the state
-// before RegionFlightService grounds the player and before NoClip-OG's MONITOR
-// cleanup erases its own record of them. Kicks funnel into the same quit event,
-// which is also why nothing here (or in the services behind it) may act on
-// PlayerKickEvent: that fires earlier and would corrupt the snapshot.
+// Captures the flight snapshot at LOWEST, before grounding and NoClip cleanup.
+// Kicks funnel into this quit event; a PlayerKickEvent handler would corrupt it.
 public final class FlightQuitListener implements Listener {
 
     private final SpawnOG plugin;
@@ -52,9 +49,8 @@ public final class FlightQuitListener implements Listener {
 
     }
 
-    // Replays the quit capture for everyone still online, so a /reload or a
-    // shutdown that skips quit events records flyers the same way a disconnect
-    // does. Runs before the flight service revokes anything.
+    // Replays the quit capture for everyone online, so a /reload or shutdown
+    // that skips quit events records flyers before the flight service revokes.
     public void captureAll() {
 
         plugin.getServer().getOnlinePlayers().forEach(this::capture);

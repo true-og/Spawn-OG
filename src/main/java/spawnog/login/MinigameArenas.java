@@ -7,15 +7,8 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
-// Reports whether a player is inside a minigame arena.
-//
-// Autopsy migration exists for OG:SMP season 1 players who were left in spectator mode on the SMP. A minigame puts
-// its own players into spectator legitimately -- Spleef does it to everyone it eliminates, and Splegg runs whole
-// matches in worlds it owns -- so without this check a routine minigame disconnect looks identical to the state the
-// migration is meant to rescue. Migrating one of those players burns their one-shot migration flag and records the
-// arena as their /spawnback location.
-//
-// Every lookup is reflective and optional: no minigame is a dependency, and an absent one simply answers "no".
+// Reports whether a player is inside a minigame arena. Minigames use spectator
+// legitimately; without this an arena disconnect looks like an abandoned autopsy.
 public final class MinigameArenas {
 
     private static final String SPLEEF_PLUGIN = "Spleef-OG";
@@ -45,10 +38,8 @@ public final class MinigameArenas {
             if (Boolean.TRUE.equals(api.getMethod("isInSpleef", Player.class).invoke(null, player)))
                 return true;
 
-            // Survives a crash, where the live session is gone but the saved pre-match
-            // state is not. That is
-            // exactly the login on which a minigame casualty would otherwise be mistaken
-            // for an SMP one.
+            // Survives a crash: the live session is gone but the saved pre-match
+            // state is not, exactly when a casualty would be mistaken for SMP.
             Method pending = api.getMethod("hasPendingRecovery", java.util.UUID.class);
             return Boolean.TRUE.equals(pending.invoke(null, player.getUniqueId()));
 

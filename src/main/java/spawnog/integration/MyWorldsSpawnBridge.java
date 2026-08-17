@@ -9,11 +9,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.world.WorldLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
-// Pushes Spawn-OG's global spawn into MyWorlds so both agree on where world
-// spawn is. Without this, MyWorlds stamps its own worlds.yml spawn onto the world
-// on every load and anything that teleports to World#getSpawnLocation (new
-// players, /world tp, minigame teardown fallbacks) ignores /setspawn.
-// Reflection keeps MyWorlds a soft dependency: My_Worlds is the TrueOG fork name.
+// Pushes the global spawn into MyWorlds so World#getSpawnLocation matches
+// /setspawn. Reflection keeps it soft; My_Worlds is the TrueOG fork name.
 public final class MyWorldsSpawnBridge implements Listener {
 
     private static final String[] PLUGIN_NAMES = { "MyWorlds", "My_Worlds" };

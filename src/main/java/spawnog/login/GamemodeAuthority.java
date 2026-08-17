@@ -8,16 +8,12 @@ import org.bukkit.entity.Player;
 // that rule when it is installed; Spawn-OG's own rules stand in when it is not.
 public interface GamemodeAuthority {
 
-    // Whether the player may hold the gamemode at the location, which is not
-    // always where they stand: login safety asks about the destination it is
-    // about to move them to. Null when the authority cannot answer right now,
-    // so the caller falls back.
+    // Whether the player may hold the gamemode at the location (often a rescue
+    // destination, not where they stand). Null when the authority cannot answer.
     Boolean mayUse(Player player, GameMode gamemode, Location location);
 
-    // Switches the player's gamemode through the authority's own machinery, so
-    // its side effects (inventory swaps, region-listener exemptions) apply.
-    // False when no authority is running or the switch was cancelled; Spawn-OG
-    // never sets a sanctioned gamemode behind the authority's back.
+    // Switches gamemode through the authority so its side effects (inventory
+    // swaps, exemptions) apply; false when absent or the switch was cancelled.
     default boolean changeGameMode(Player player, GameMode gamemode) {
 
         return false;

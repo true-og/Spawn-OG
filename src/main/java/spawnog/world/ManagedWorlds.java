@@ -14,10 +14,8 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
-// The SMP dimensions Spawn-OG governs, read from login-safety.worlds. Login
-// safety normalizes logins in them and respawns are kept inside them, so both
-// consult one list. Also remembers which of them each player was in last,
-// because a respawn that would land outside them has to pick one to come back to.
+// The SMP dimensions Spawn-OG governs (login-safety.worlds): one list for both
+// login normalization and respawn routing; remembers each player's last one.
 public final class ManagedWorlds implements Listener {
 
     private static final List<String> DEFAULTS = List.of("world", "world_nether", "world_the_end");

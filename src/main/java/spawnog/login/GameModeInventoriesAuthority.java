@@ -8,9 +8,8 @@ import org.bukkit.plugin.RegisteredServiceProvider;
 
 import spawnog.SpawnOG;
 
-// GameModeInventories-OG's published policy, taken from the services manager it
-// registers on enable. Only constructed when that plugin is enabled, so its
-// classes are never resolved on servers running without it.
+// GameModeInventories-OG's published policy from the services manager. Only
+// constructed when that plugin is enabled, so its classes never resolve without it.
 public final class GameModeInventoriesAuthority implements GamemodeAuthority {
 
     public static final String PLUGIN_NAME = "GameModeInventories-OG";

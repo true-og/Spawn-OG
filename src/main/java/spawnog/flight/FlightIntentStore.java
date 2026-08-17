@@ -9,9 +9,7 @@ import spawnog.SpawnOG;
 import spawnog.login.YamlStore;
 
 // Remembers who has /fly switched on, so the choice survives relogs and
-// restarts instead of dying with the session. Only the intent is stored;
-// whether flight is actually granted is re-decided against the region rules
-// and permissions every time it is applied.
+// restarts. Only intent is stored; each grant is re-judged against the rules.
 public final class FlightIntentStore extends YamlStore {
 
     public FlightIntentStore(SpawnOG plugin) {

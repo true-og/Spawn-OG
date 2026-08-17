@@ -41,19 +41,22 @@ public final class LoginMigrationService {
     private final ReturnLocationStore returnLocationStore;
     private final FlightSnapshotStore flightSnapshotStore;
     private final GamemodePolicy gamemodePolicy;
+    // Null without GameModeInventories-OG; creative is then never promoted back
+    // after a rescue, because only its machinery swaps inventories safely.
+    private final GamemodeAuthority gamemodeAuthority;
     private final ManagedWorlds managedWorlds;
     private final FallProtection fallProtection;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final Map<UUID, PendingLogin> pendingLogins = new HashMap<>();
     private final List<Consumer<Player>> completionListeners = new ArrayList<>();
-    // Decides whether and how a rescued flyer gets their flight back. Set after
-    // construction because it is built around the flight service, which takes
-    // this service in its own constructor.
+    // Decides how a rescued flyer gets flight back. Set after construction
+    // because it is built around the flight service, which takes this service.
     private FlightRestorer flightRestorer;
 
     public LoginMigrationService(SpawnOG plugin, AutopsyMigrationStore migrationStore,
             ReturnLocationStore returnLocationStore, FlightSnapshotStore flightSnapshotStore,
-            GamemodePolicy gamemodePolicy, ManagedWorlds managedWorlds, FallProtection fallProtection)
+            GamemodePolicy gamemodePolicy, GamemodeAuthority gamemodeAuthority, ManagedWorlds managedWorlds,
+            FallProtection fallProtection)
     {
 
         this.plugin = plugin;
@@ -61,6 +64,7 @@ public final class LoginMigrationService {
         this.returnLocationStore = returnLocationStore;
         this.flightSnapshotStore = flightSnapshotStore;
         this.gamemodePolicy = gamemodePolicy;
+        this.gamemodeAuthority = gamemodeAuthority;
         this.managedWorlds = managedWorlds;
         this.fallProtection = fallProtection;
 
@@ -71,9 +75,8 @@ public final class LoginMigrationService {
         if (!plugin.getConfig().getBoolean("login-safety.enabled", true))
             return false;
 
-        // A snapshot is only believed when the login still looks like the quit
-        // it recorded; a mismatch, a minigame arena, or an unmanaged world
-        // discards it on the spot so it can never ambush a later login.
+        // A snapshot is believed only while the login still looks like the quit:
+        // a mismatch, minigame arena, or unmanaged world discards it on the spot.
         FlightSnapshot snapshot = flightSnapshotStore.peek(player.getUniqueId());
         if (snapshot != null) {
 
@@ -93,9 +96,8 @@ public final class LoginMigrationService {
 
     }
 
-    // A relog in flight: either the player still has the right to that flight
-    // where they hang and holds the bypass, in which case it is resumed on the
-    // spot, or they are pulled to spawn with /spawnback as the way back.
+    // A relog in flight: resumed on the spot when still permitted there and the
+    // bypass is held, otherwise a pull to spawn with /spawnback as the way back.
     private boolean handleAirborneLogin(Player player, Location plannedDestination, FlightSnapshot snapshot) {
 
         FlightMode mode = snapshot.mode();
@@ -134,14 +136,12 @@ public final class LoginMigrationService {
 
         }
 
-        // Corroboration has already pinned the snapshot to this login: the
-        // recorded spot is where the player hangs right now, and the recorded
-        // gamemode is the one they carry.
+        // Corroboration pinned the snapshot to this login: the recorded spot and
+        // gamemode are the ones the player carries right now.
         GameMode originalGamemode = snapshot.gamemode();
         Location origin = snapshot.location().clone();
-        // Judged at the rescue destination, same as a grounded login: a
-        // creative flyer rescued into the spawn creative region keeps creative
-        // instead of being dropped to survival.
+        // Judged at the rescue destination, same as a grounded login: a creative
+        // flyer rescued into the spawn creative region keeps creative.
         boolean normalizeGamemode = !gamemodePolicy.mayUse(player, originalGamemode, destination)
                 && plugin.getConfig().getBoolean("login-safety.normalize-non-staff-gamemode", true);
         beginTransaction(player, destination, new PendingLogin(player.isInvulnerable(), snapshot.allowFlight(), true,
@@ -160,12 +160,8 @@ public final class LoginMigrationService {
         boolean mayKeepGamemode = gamemodePolicy.mayUse(player, originalGamemode, player.getLocation());
         boolean normalizeGamemode = managedWorld && !mayKeepGamemode
                 && plugin.getConfig().getBoolean("login-safety.normalize-non-staff-gamemode", true);
-        // A sanctioned spectator is working, not an abandoned autopsy state.
-        // A minigame puts its own players into spectator legitimately, so a disconnect
-        // from an arena looks exactly
-        // like the abandoned season 1 state this migration exists to rescue. Migrating
-        // one of those would burn the
-        // player's one-shot flag and record the arena as their /spawnback location.
+        // Minigames put players into spectator legitimately, so an arena
+        // disconnect must not burn the one-shot flag or record the arena.
         boolean minigameArena = MinigameArenas.contains(player);
         boolean autopsyMigration = managedWorld && !staff && !mayKeepGamemode && !minigameArena
                 && originalGamemode == GameMode.SPECTATOR
@@ -182,8 +178,7 @@ public final class LoginMigrationService {
             destination = globalSpawn();
 
         // The player ends up at the destination, so their right to the login
-        // gamemode is judged there too: a creative login rescued into the spawn
-        // creative region keeps creative instead of being dropped to survival.
+        // gamemode is judged there too: permitted there means no normalization.
         if (destination != null && !mayKeepGamemode && gamemodePolicy.mayUse(player, originalGamemode, destination)) {
 
             normalizeGamemode = false;
@@ -347,6 +342,10 @@ public final class LoginMigrationService {
 
         }
 
+        // Force-gamemode demotes non-survival quitters before login, so skipping
+        // normalization is not enough: the gamemode must be actively handed back.
+        promoteGamemode(player, pending);
+
         if (pending.snapshot() != null) {
 
             Location from = pending.originalLocation();
@@ -405,9 +404,37 @@ public final class LoginMigrationService {
 
     }
 
-    // Writes the /spawnback record and offers it. False means the player was
-    // told the way back could not be saved, and the caller must not spend
-    // whatever evidence would let a later login try again.
+    // Re-promotes a rescued player to the gamemode they left with, judged live
+    // where they stand. Creative only via the authority (inventory swap).
+    private void promoteGamemode(Player player, PendingLogin pending) {
+
+        GameMode original = pending.originalGamemode();
+        if (original != GameMode.CREATIVE && original != GameMode.SPECTATOR)
+            return;
+        if (player.getGameMode() == original || pending.normalizeGamemode() || pending.autopsyMigration())
+            return;
+        if (!gamemodePolicy.mayUse(player, original, player.getLocation()))
+            return;
+
+        boolean promoted;
+        if (gamemodeAuthority != null)
+            promoted = gamemodeAuthority.changeGameMode(player, original);
+        else if (original == GameMode.SPECTATOR) {
+
+            player.setGameMode(original);
+            promoted = player.getGameMode() == original;
+
+        } else
+            promoted = false;
+
+        if (!promoted)
+            plugin.getLogger().warning("Unable to return " + player.getName() + " to " + original.name()
+                    + " after their rescue; they remain in " + player.getGameMode().name() + ".");
+
+    }
+
+    // Writes and offers the /spawnback record. False: the player was told it
+    // could not be saved; the caller must keep the evidence for a later retry.
     private boolean offerReturn(Player player, PendingLogin pending) {
 
         String reason;
@@ -436,10 +463,8 @@ public final class LoginMigrationService {
 
     }
 
-    // The failure mode when a rescue cannot run or finish: the player keeps
-    // their gamemode and place, gets the narrowest protection that stops the
-    // situation from hurting them, and everything expires on its own. Never
-    // parks anyone in spectator, because nothing would ever take them out.
+    // Failure mode when a rescue cannot finish: keep gamemode and place, grant
+    // the narrowest self-expiring protection, never park anyone in spectator.
     private void protectInPlace(Player player, FlightSnapshot snapshot, boolean originalInvulnerable) {
 
         // A flyer is given back the flight they already had, as a loan the
@@ -479,9 +504,8 @@ public final class LoginMigrationService {
 
     }
 
-    // Same spot and still off the ground, or the snapshot is stale. Gamemode
-    // equality is NOT required (force-gamemode rewrites quitters to survival),
-    // and live flight bits alone are not either (/fly is revoked on quit).
+    // Same spot and still off the ground, or stale. Gamemode equality is NOT
+    // required (force-gamemode), nor live flight bits (/fly is revoked on quit).
     private boolean corroborates(Player player, FlightSnapshot snapshot) {
 
         Location recorded = snapshot.location();

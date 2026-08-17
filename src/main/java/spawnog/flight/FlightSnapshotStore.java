@@ -11,17 +11,8 @@ import org.bukkit.entity.Player;
 import spawnog.SpawnOG;
 import spawnog.login.YamlStore;
 
-// Remembers everything about a player who left mid-flight: where, in which
-// gamemode, and by which kind of flight. The next login reads this to decide
-// between resuming the flight in place and rescuing the player to spawn, and
-// the /spawnback record is written from it.
-//
-// Last quit wins: a quit while flying writes the record, a grounded quit
-// erases it, so a stale snapshot can never make a later login look airborne.
-//
-// Persisted rather than kept in memory because a shutdown grounds players the
-// same way a disconnect does, and the player may not come back until long
-// after.
+// Persistent record of who left mid-flight: where, gamemode, and kind of
+// flight. Last quit wins: a grounded quit erases any stale airborne record.
 public final class FlightSnapshotStore extends YamlStore {
 
     public FlightSnapshotStore(SpawnOG plugin) {
@@ -36,9 +27,8 @@ public final class FlightSnapshotStore extends YamlStore {
         Location location = player.getLocation();
         data.set(path + ".player-name", player.getName());
         data.set(path + ".recorded-at", Instant.now().toString());
-        // Plain numbers rather than a serialized Location: deserializing one
-        // whose world is unloaded throws, and that would take every other
-        // player's record down with it.
+        // Plain numbers, not a serialized Location: one unloaded world would
+        // throw and take every other player's record down with it.
         data.set(path + ".location.world", location.getWorld() == null ? null : location.getWorld().getName());
         data.set(path + ".location.x", location.getX());
         data.set(path + ".location.y", location.getY());
@@ -114,9 +104,8 @@ public final class FlightSnapshotStore extends YamlStore {
 
     }
 
-    // gamemode and location may be null for older or unloaded-world records;
-    // mode() tolerates both. An absent fly-intent reads false, so a truncated
-    // record classifies as NONE, never as a /fly grant the player lacked.
+    // gamemode and location may be null on older or unloaded-world records. An
+    // absent fly-intent reads false, so truncation classifies as NONE, never FLY.
     public record FlightSnapshot(GameMode gamemode, Location location, boolean allowFlight, boolean flying,
             boolean noclip, boolean flyIntent)
     {

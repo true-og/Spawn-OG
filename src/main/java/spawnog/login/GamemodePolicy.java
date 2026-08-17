@@ -12,13 +12,8 @@ import org.bukkit.entity.Player;
 import spawnog.SpawnOG;
 import spawnog.region.RegionLookup;
 
-// Decides who may log in outside survival. Everyone else is returned to
-// survival, because a non-survival login in an SMP world is either a leftover
-// autopsy state or an escape from survival rules.
-//
-// GameModeInventories-OG owns that rule at runtime, so this defers to the
-// authority it publishes rather than keeping a second copy that can drift. The
-// local rules below stand in on servers running Spawn-OG without it.
+// Decides who may log in outside survival. GameModeInventories-OG owns the
+// rule at runtime and is asked first; the local rules below stand in without it.
 public final class GamemodePolicy {
 
     private static final String ANYWHERE_PERMISSION = "gamemodeinventories.anywhere";
@@ -43,9 +38,8 @@ public final class GamemodePolicy {
 
     }
 
-    // True when the player is allowed to hold the gamemode they logged in with
-    // at the location. Judged against wherever they will actually end up, so a
-    // rescue teleport asks about its destination rather than the login spot.
+    // True when the player may hold the gamemode at the location, judged where
+    // they will actually end up: a rescue asks about its destination.
     public boolean mayUse(Player player, GameMode gamemode, Location location) {
 
         if (gamemode == GameMode.SURVIVAL)

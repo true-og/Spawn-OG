@@ -55,10 +55,8 @@ public final class RegionFlightService implements Listener {
     private final FallProtection fallProtection;
     private final Map<String, RuleKind> regionRules = new HashMap<>();
     private final Map<UUID, FlightOverride> flightOverrides = new HashMap<>();
-    // Players flying on a grant that belongs to no region, handed out so a
-    // /spawnback return does not drop them from the height that got them
-    // rescued. Tracked separately from the region overrides because it is
-    // revoked by landing rather than by leaving a region.
+    // Flyers on a grant belonging to no region, so a /spawnback return does not
+    // drop them. Revoked by landing rather than by leaving a region.
     private final Set<UUID> landingGrants = new HashSet<>();
     private final Set<UUID> scheduledRefreshes = new HashSet<>();
     private int particleStep;
@@ -141,19 +139,15 @@ public final class RegionFlightService implements Listener {
 
     }
 
-    // Puts a player back into the air after a plugin-driven teleport when they
-    // were flying beforehand. False means the player was left airborne without
-    // flight, so the caller can say why. Refuses when the player lacks flight
-    // permission or the destination forbids flight.
+    // Puts a player back into the air after a plugin teleport when they flew
+    // before. False: left airborne without flight, so the caller can say why.
     public boolean resumeFlight(Player player) {
 
         if (player == null || !player.isOnline())
             return false;
 
-        // Reconcile against where the player now stands before granting
-        // anything. The override from the region they were teleported out of is
-        // still in the map, and leaving it there lets the next refresh restore
-        // it and take the flight straight back a tick later.
+        // Reconcile where the player now stands first: the departed region's
+        // override would otherwise be restored and take the flight back a tick later.
         refresh(player);
 
         UUID playerId = player.getUniqueId();
@@ -173,9 +167,8 @@ public final class RegionFlightService implements Listener {
         if (!hasFlightPermission(player))
             return false;
 
-        // Every grant is recorded, so leaving the region, a nofly rule, and
-        // disconnecting can all take it back. An unrecorded one would survive
-        // into the player's saved abilities and become permanent free flight.
+        // Every grant is recorded so region exit, nofly, and disconnect can take
+        // it back; unrecorded it would persist as permanent free flight.
         if (rule != null && rule.kind() == RuleKind.FLY) {
 
             player.setAllowFlight(true);
@@ -205,17 +198,14 @@ public final class RegionFlightService implements Listener {
 
     }
 
-    // Evaluates the rules at an explicit position, because during a move or
-    // teleport event the player entity still reports the pre-move location and
-    // judging there would leave the rules one step behind at region borders.
+    // Judges at an explicit position: during move/teleport events the entity
+    // still reports the pre-move spot, one step behind at region borders.
     public void refresh(Player player, org.bukkit.Location at) {
 
         if (player == null || !player.isOnline() || at == null)
             return;
-        // While a login migration is in flight, do not reschedule: the completion
-        // listener registered in the constructor refreshes once it resolves.
-        // Re-polling here previously spun the scheduler within a single tick and
-        // froze the server, because the migration could only resolve on a later tick.
+        // While a login migration is pending, do not reschedule: its completion
+        // listener refreshes. Re-polling once spun the scheduler and froze the server.
         if (loginMigrationService.isPending(player))
             return;
         if (releaseGamemodeFlyer(player))
@@ -224,10 +214,8 @@ public final class RegionFlightService implements Listener {
         UUID playerId = player.getUniqueId();
         RegionRule rule = ruleAt(at);
 
-        // The landing loan ends once the player is down, and at once inside a
-        // region that denies them flight. Revoked before the branches below read
-        // the ability, so a nofly region records the player's own flight state
-        // as the original rather than the loan and cannot hand it back later.
+        // The loan ends on touchdown or inside a denying region. Revoked before
+        // the branches read abilities, so a nofly never records the loan as owned.
         if (landingGrants.contains(playerId) && (LocationSafety.isSupported(at)
                 || rule != null && rule.kind() == RuleKind.NOFLY && !hasBypass(player)))
             revokeLandingGrant(player);
@@ -315,19 +303,16 @@ public final class RegionFlightService implements Listener {
         if (releaseGamemodeFlyer(player))
             return;
 
-        // The airborne evidence is FlightQuitListener's snapshot, captured at
-        // LOWEST before this runs, so grounding here loses nothing.
-        //
-        // The loan before the override, so a loan is never mistaken for an
-        // ability the player owned and written back into their saved abilities.
+        // The LOWEST-priority quit snapshot already holds the airborne evidence,
+        // so grounding loses nothing. Loan before override: a loan is never saved as
+        // owned.
         revokeLandingGrant(player);
         restoreOverride(player, flightOverrides.get(player.getUniqueId()));
 
     }
 
-    // Creative and spectator flight is gamemode-derived and never regional:
-    // bookkeeping is dropped, not applied, so a stale override can neither
-    // ground a gamemode flyer nor leak a loaned ability back to survival.
+    // Creative and spectator flight is gamemode-derived, never regional:
+    // bookkeeping is dropped, not applied, so overrides neither ground nor leak.
     private boolean releaseGamemodeFlyer(Player player) {
 
         GameMode gamemode = player.getGameMode();
@@ -400,17 +385,15 @@ public final class RegionFlightService implements Listener {
                 && event.getFrom().getBlockX() == event.getTo().getBlockX()
                 && event.getFrom().getBlockY() == event.getTo().getBlockY()
                 && event.getFrom().getBlockZ() == event.getTo().getBlockZ();
-        // Judged where the player is going, not where they still stand.
-        // Teleports never reach this handler (PlayerTeleportEvent has its own
-        // HandlerList); onTeleport's scheduled refresh covers them instead.
+        // Judged where the player is going. Teleports never reach this handler
+        // (own HandlerList); onTeleport's scheduled refresh covers them.
         if (!sameBlock)
             refresh(player, event.getTo());
 
     }
 
-    // No PlayerKickEvent handler on purpose: a kick fires before the quit event
-    // that FlightQuitListener snapshots from, so grounding a kicked player early
-    // would erase the airborne evidence. The quit event always follows.
+    // No PlayerKickEvent handler on purpose: a kick precedes the quit event the
+    // snapshot reads from; grounding early would erase the airborne evidence.
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
 
@@ -448,9 +431,8 @@ public final class RegionFlightService implements Listener {
 
     }
 
-    // Grants regional flight to a player standing inside a fly region they hold
-    // permission for, recording the grant and the intent so it is revoked and
-    // re-armed like any /fly toggle. The restore path for a rescued /fly flyer.
+    // Grants regional flight inside a permitted fly region, recording grant and
+    // intent like a /fly toggle. The restore path for a rescued /fly flyer.
     public boolean grantRegionFlight(Player player) {
 
         if (player == null || !player.isOnline() || !hasFlightPermission(player))
@@ -482,17 +464,15 @@ public final class RegionFlightService implements Listener {
 
     }
 
-    // Re-grants flight inside a fly region for a player whose stored intent says
-    // /fly was left on. The live ability is dropped on quit (and by login
-    // normalization), so without this the toggle would not survive a relog.
+    // Re-grants flight in a fly region when stored intent says /fly was on; the
+    // live ability dies on quit, so the toggle would not survive a relog.
     private void rearmPersistedFlight(Player player, RegionRule rule) {
 
         if (!flightIntentStore.contains(player.getUniqueId()) || !hasFlightPermission(player))
             return;
 
-        // Another authority (creative mode, a bypass, another plugin) already
-        // allows flight, so there is no override to track; but an airborne
-        // player still needs the flying flag itself put back.
+        // Another authority already allows flight, so there is no override to
+        // track; an airborne player still needs the flying flag put back.
         if (!player.getAllowFlight()) {
 
             player.setAllowFlight(true);
@@ -597,9 +577,8 @@ public final class RegionFlightService implements Listener {
         UUID playerId = player.getUniqueId();
         if (!scheduledRefreshes.add(playerId))
             return;
-        // Paper's scheduler executes zero-delay tasks scheduled from within a task
-        // in the same tick, so a one-tick delay is required to guarantee the
-        // current tick always finishes before the refresh runs.
+        // Paper runs zero-delay tasks scheduled from within a task in the same
+        // tick, so a one-tick delay guarantees the current tick finishes first.
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
 
             scheduledRefreshes.remove(playerId);

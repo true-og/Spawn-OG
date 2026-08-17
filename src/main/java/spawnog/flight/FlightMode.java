@@ -2,9 +2,8 @@ package spawnog.flight;
 
 import org.bukkit.GameMode;
 
-// The kind of flight a player was using when they left, which decides how
-// /spawnback puts them back into the air. Classified once from the quit
-// snapshot and carried through the return record.
+// The kind of flight a player left with, deciding how /spawnback puts them
+// back into the air. Classified once at quit and carried through the record.
 public enum FlightMode {
 
     // Regional /fly: survival flight granted by RegionFlightService.
@@ -18,9 +17,8 @@ public enum FlightMode {
     // No flight to restore: a grounded rescue or a record predating modes.
     NONE;
 
-    // NoClip wins because /nc drives the gamemode itself. Survival flight only
-    // counts as FLY when /fly was actually toggled; flight without that intent
-    // is NONE, so /spawnback never invents a toggle the player did not make.
+    // NoClip wins because /nc drives the gamemode itself. Survival flight is
+    // FLY only with a real /fly toggle, so a toggle is never invented.
     public static FlightMode classify(GameMode gamemode, boolean noclip, boolean flyIntent) {
 
         if (noclip)

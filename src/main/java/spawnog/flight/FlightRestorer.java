@@ -8,11 +8,8 @@ import spawnog.login.GamemodeAuthority;
 import spawnog.login.GamemodePolicy;
 import spawnog.login.NoClipAuthority;
 
-// The single decision table for handing a rescued flyer their flight back:
-// /spawnback and the login bypass path both ask it, so the warning, the
-// restore, and the in-place resume can never disagree. Every check is judged
-// at the destination, and a nofly region outranks every mode of flight unless
-// the player holds the regional flight bypass.
+// The single decision table for handing a rescued flyer flight back, shared by
+// /spawnback and login so they never disagree; a nofly region outranks all but bypass.
 public final class FlightRestorer {
 
     public static final String NOCLIP_PERMISSION = "noclip.use";
@@ -38,9 +35,8 @@ public final class FlightRestorer {
 
     }
 
-    // Whether the player's prior mode of flight would be handed back at the
-    // destination. /spawnback asks this before warning, so a player headed for
-    // a drop is told about it up front.
+    // Whether the prior mode of flight would be handed back at the destination.
+    // Asked before warning, so a player headed for a drop is told up front.
     public boolean canRestore(FlightMode mode, Player player, Location destination) {
 
         if (mode == null || player == null || destination == null)
@@ -61,9 +57,7 @@ public final class FlightRestorer {
     }
 
     // Puts the player back into their prior mode of flight where they stand.
-    // Permissions are re-checked live, so a right lost since the warning is a
-    // refusal here rather than an unearned grant. False means the caller owes
-    // the player fall protection.
+    // Rights re-checked live; false means the caller owes fall protection.
     public boolean restore(FlightMode mode, Player player) {
 
         if (player == null || !canRestore(mode, player, player.getLocation()))
@@ -80,9 +74,8 @@ public final class FlightRestorer {
 
     }
 
-    // Like canRestore, except a sanctioned spectator is left alone. Only a
-    // player still IN spectator qualifies: force-gamemode rewrites the mode
-    // between quit and login, and an ex-spectator takes the rescue instead.
+    // Like canRestore, except a sanctioned spectator is left alone. Only a live
+    // spectator qualifies: force-gamemode rewrites the mode between quit and login.
     public boolean canResumeInPlace(FlightMode mode, Player player, Location location) {
 
         if (mode == FlightMode.SPECTATOR)
@@ -102,9 +95,8 @@ public final class FlightRestorer {
 
     }
 
-    // The narrowest flight that covers a descent when no mode can be restored:
-    // a landing loan the flight service revokes on touchdown. For the rescue
-    // paths that leave a player airborne with nothing else holding them up.
+    // The narrowest flight covering a descent when nothing can be restored: a
+    // landing loan the flight service revokes on touchdown.
     public boolean loanFlight(Player player) {
 
         return regionFlightService != null && regionFlightService.resumeFlight(player);
@@ -118,9 +110,8 @@ public final class FlightRestorer {
 
     }
 
-    // Creative flight needs GameModeInventories-OG's sanction for the gamemode
-    // and the region rules' sanction for the flight: gamemodeinventories.anywhere
-    // licenses creative everywhere, but a nofly region still grounds it.
+    // Creative flight needs GMI's sanction for the gamemode and the region
+    // rules' for the flight: anywhere licenses creative, a nofly still grounds it.
     private boolean creativeFlightPermitted(Player player, Location destination) {
 
         if (regionFlightService == null || gamemodeAuthority == null)
@@ -133,9 +124,8 @@ public final class FlightRestorer {
 
     }
 
-    // Creative through the authority so the inventory swap runs. Ability then
-    // state are re-asserted, not trusted: an already-creative player skips the
-    // vanilla ability reset, and setFlying throws while allow-flight is off.
+    // Creative through the authority so the inventory swap runs. Abilities are
+    // re-asserted, not trusted; setFlying throws while allow-flight is off.
     private boolean restoreCreative(Player player) {
 
         if (!gamemodeAuthority.changeGameMode(player, GameMode.CREATIVE))

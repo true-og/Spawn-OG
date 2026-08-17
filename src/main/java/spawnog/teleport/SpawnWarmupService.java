@@ -19,10 +19,8 @@ import org.bukkit.scheduler.BukkitTask;
 
 import spawnog.SpawnOG;
 
-// Owns the countdown between /spawn and the teleport that follows it. Moving
-// out of the block the countdown started in cancels the teleport; taking damage
-// does not, so a player being hit while standing still still gets pulled to
-// spawn.
+// Owns the countdown between /spawn and its teleport. Leaving the starting
+// block cancels it; damage does not, so a player under attack still gets pulled.
 public final class SpawnWarmupService implements Listener {
 
     public static final int WARMUP_SECONDS = 5;
@@ -51,9 +49,8 @@ public final class SpawnWarmupService implements Listener {
 
         BukkitTask task = plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
 
-            // Drop the pending entry before teleporting: PlayerTeleportEvent extends
-            // PlayerMoveEvent, so leaving it in place would make the teleport cancel
-            // itself the moment it fires.
+            // Drop the pending entry first: PlayerTeleportEvent extends
+            // PlayerMoveEvent, so the teleport would otherwise cancel itself.
             pendingTeleports.remove(playerId);
             if (player.isOnline())
                 player.teleportAsync(destination);

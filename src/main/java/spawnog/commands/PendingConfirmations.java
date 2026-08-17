@@ -5,10 +5,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.LongSupplier;
 
-// The two-step /spawnback state: the first invocation arms a warning, the
-// second within the window executes. Keyed by the return record's token, so a
-// warning issued for one rescue can never confirm a different one recorded in
-// between. Clock injected so the expiry logic is testable off the server.
+// Two-step /spawnback state: first call arms a warning, second in the window
+// executes. Keyed by record token; clock injected so expiry is testable.
 public final class PendingConfirmations {
 
     private final LongSupplier clock;
@@ -20,9 +18,8 @@ public final class PendingConfirmations {
 
     }
 
-    // True when a live warning for exactly this token is on record, consuming
-    // it. False arms (or re-arms) the warning for this token instead: a first
-    // call, an expired window, and a token mismatch all warn anew.
+    // True consumes a live warning for exactly this token. False arms anew: a
+    // first call, an expired window, and a token mismatch all warn again.
     public boolean confirm(UUID playerId, String token, long windowMillis) {
 
         long now = clock.getAsLong();

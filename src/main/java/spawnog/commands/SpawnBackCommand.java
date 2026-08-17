@@ -28,9 +28,8 @@ import spawnog.login.ReturnLocationStore;
 import spawnog.login.ReturnLocationStore.ReturnPoint;
 import spawnog.teleport.FallProtection;
 
-// Sends a player back to wherever a login safety migration took them from. The
-// position is knowingly unsafe, so the first /spawnback only warns and the
-// second one within the window executes; there is no subcommand.
+// Sends a player back to where a login safety migration took them from. The
+// spot is knowingly unsafe: first /spawnback warns, second in the window runs.
 public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Listener {
 
     private static final int DEFAULT_CONFIRM_SECONDS = 30;
@@ -105,17 +104,17 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
                     coordinates(point), Placeholder.unparsed("reason", point.reason()),
                     Placeholder.unparsed("seconds", String.valueOf(confirmSeconds)));
             // A flyer headed for a spot that no longer permits their flight is
-            // told about the drop before they commit to it.
-            if (point.mode() != FlightMode.NONE && !flightRestorer.canRestore(point.mode(), player, point.location()))
+            // warned of the drop; a sanctioned live spectator cannot fall.
+            if (point.mode() != FlightMode.NONE
+                    && !flightRestorer.canResumeInPlace(point.mode(), player, point.location()))
                 send(player, "locale.spawnbackFallWarning",
                         "<gold>You can no longer fly there, so you will fall; a one-time fall protection will cover the landing.</gold>");
             return true;
 
         }
 
-        // A plain return may land in a spot built over since the rescue, so it
-        // is lifted to the nearest clear position above; fall protection below
-        // covers drops. Flight returns keep the exact spot they left mid-air.
+        // A plain return may be built over since the rescue, so it is lifted to
+        // the nearest clear spot above; flight returns keep the exact position.
         Location recorded = point.location().clone();
         Location destination = recorded;
         if (point.mode() == FlightMode.NONE) {
@@ -144,9 +143,10 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
                 }
 
-                // Re-checked live at the destination: a permission or region
-                // right lost since the warning means protection, not flight.
-                boolean restored = flightRestorer.restore(point.mode(), player);
+                // Re-checked live at the destination: a right lost since the
+                // warning means protection; a sanctioned spectator is left as is.
+                boolean restored = flightRestorer.canResumeInPlace(point.mode(), player, player.getLocation())
+                        && flightRestorer.resumeInPlace(point.mode(), player);
                 if (!restored) {
 
                     fallProtection.grant(player);
