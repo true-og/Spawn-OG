@@ -44,8 +44,8 @@ public final class ReturnLocationStore extends YamlStore {
         data.set(path + ".location.z", location.getZ());
         data.set(path + ".location.yaw", location.getYaw());
         data.set(path + ".location.pitch", location.getPitch());
-        // The mode decides what /spawnback hands back; raw gamemode and ability
-        // are kept alongside so staff can see what a player actually lost.
+        // The mode decides what flight /spawnback hands back; gamemode and the
+        // ability bits let it re-promote a standing creative or spectator.
         data.set(path + ".mode", mode == null ? FlightMode.NONE.name() : mode.name());
         data.set(path + ".gamemode", gamemode == null ? null : gamemode.name());
         data.set(path + ".allow-flight", allowFlight);
@@ -152,8 +152,8 @@ public final class ReturnLocationStore extends YamlStore {
 
     }
 
-    // mode is what /spawnback restores; gamemode/allowFlight are diagnostic.
-    // token ties a warning and its confirmation to the same rescue.
+    // mode is the flight /spawnback restores; gamemode/allowFlight drive the
+    // gamemode promotion. token ties a warning and its confirmation together.
     public record ReturnPoint(Location location, String reason, String worldName, GameMode gamemode,
             boolean allowFlight, boolean flying, FlightMode mode, String token)
     {

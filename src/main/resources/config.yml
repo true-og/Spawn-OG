@@ -18,10 +18,8 @@ login-safety:
   remove-flight-on-normalize: true
   # Seconds of invulnerability when a rescue cannot run, so a failure never leaves a player stuck or dead.
   failed-rescue-grace-seconds: 30
-  # Fallback rules, used only when GameModeInventories-OG is absent: it is the
-  # authority on gamemodes and Spawn-OG asks it first. Holding one of these keeps
-  # a creative or spectator login, and only inside the creative regions below (or
-  # with gamemodeinventories.anywhere). Adventure is never kept.
+  # Fallback rules, used only when GameModeInventories-OG (the gamemode authority) is absent.
+  # Holding one of these keeps a creative or spectator login inside the creative regions below (or with gamemodeinventories.anywhere); adventure is never kept.
   gamemode-exemption-permissions:
     creative:
       - noclip.use
@@ -75,6 +73,10 @@ locale:
   returnWorldMissing: "<red>The world you were in (<world>) is not loaded, so you cannot return there.</red>"
   returnBusy: "<red>Your login is still being made safe. Try again in a few seconds.</red>"
   returnFailed: "<red>Your return teleport failed.</red>"
+  # Sent when the recorded gamemode is refused at the return point, so the player stays in survival.
+  returnGamemodeDenied: "<gold>You don't have the authority to be in <red><gamemode></red> here, so you stay in survival.</gold>"
+  # Sent when the recorded spot is sealed by solid blocks all the way up; the return is refused and kept.
+  returnBlocked: "<red>The spot you left is sealed inside solid blocks, so you cannot return there right now.</red>"
 spawns:
   global:
     location:

@@ -9,13 +9,13 @@ import spawnog.login.GamemodePolicy;
 import spawnog.login.NoClipAuthority;
 
 // The single decision table for handing a rescued flyer flight back, shared by
-// /spawnback and login so they never disagree; a nofly region outranks all but bypass.
+// /spawnback and login so they never disagree; gamemode questions go to policy.
 public final class FlightRestorer {
 
     public static final String NOCLIP_PERMISSION = "noclip.use";
 
-    // Null when regional flight is off or WorldGuard is absent; every mode is
-    // then refused, because nothing could enforce a nofly region afterwards.
+    // Null when regional flight is off or WorldGuard is absent; regional
+    // survival flight and landing loans are then refused.
     private final RegionFlightService regionFlightService;
     private final GamemodePolicy gamemodePolicy;
     // Null without GameModeInventories-OG; creative is then never restored,
@@ -95,6 +95,35 @@ public final class FlightRestorer {
 
     }
 
+    // Whether the gamemode would be handed back at the destination: policy must
+    // sanction it, and creative needs the authority's inventory swap.
+    public boolean canPromoteGamemode(Player player, GameMode target, Location destination) {
+
+        if (target != GameMode.CREATIVE && target != GameMode.SPECTATOR)
+            return false;
+        if (target == GameMode.CREATIVE && gamemodeAuthority == null)
+            return false;
+
+        return gamemodePolicy.mayUse(player, target, destination);
+
+    }
+
+    // Hands a rescued player back the gamemode they left with, judged live where
+    // they stand. Creative only through the authority; spectator may go raw.
+    public boolean promoteGamemode(Player player, GameMode target) {
+
+        if (!canPromoteGamemode(player, target, player.getLocation()))
+            return false;
+        if (player.getGameMode() == target)
+            return true;
+        if (gamemodeAuthority != null)
+            return gamemodeAuthority.changeGameMode(player, target);
+
+        player.setGameMode(target);
+        return player.getGameMode() == target;
+
+    }
+
     // The narrowest flight covering a descent when nothing can be restored: a
     // landing loan the flight service revokes on touchdown.
     public boolean loanFlight(Player player) {
@@ -110,17 +139,11 @@ public final class FlightRestorer {
 
     }
 
-    // Creative flight needs GMI's sanction for the gamemode and the region
-    // rules' for the flight: anywhere licenses creative, a nofly still grounds it.
+    // Creative flight is gamemode derived: the flight service never grounds a
+    // creative flyer, so region rules and their bypass have no say here.
     private boolean creativeFlightPermitted(Player player, Location destination) {
 
-        if (regionFlightService == null || gamemodeAuthority == null)
-            return false;
-        if (!gamemodePolicy.mayUse(player, GameMode.CREATIVE, destination))
-            return false;
-
-        return regionFlightService.ruleKindAt(destination) != RegionFlightService.RuleKind.NOFLY
-                || regionFlightService.hasBypass(player);
+        return gamemodeAuthority != null && gamemodePolicy.mayUse(player, GameMode.CREATIVE, destination);
 
     }
 

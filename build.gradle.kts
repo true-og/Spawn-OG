@@ -1,4 +1,4 @@
-/* ------------------------------ Plugins ------------------------------ */
+// ------------------------------ Plugins ------------------------------
 plugins {
     id("java") // Import Java plugin.
     id("java-library") // Import Java Library plugin.
@@ -9,7 +9,7 @@ plugins {
     id("io.freefair.lombok") version "8.13.1" // Automatic lombok support.
 }
 
-/* --------------------------- JDK / Kotlin ---------------------------- */
+// --------------------------- JDK / Kotlin ----------------------------
 java {
     sourceCompatibility = JavaVersion.VERSION_17 // Compile with JDK 17 compatibility.
     toolchain { // Select Java toolchain.
@@ -18,14 +18,14 @@ java {
     }
 }
 
-/* ----------------------------- Metadata ------------------------------ */
+// ----------------------------- Metadata ------------------------------
 group = "net.trueog.spawn-og" // Declare bundle identifier.
 
 version = "1.2" // Declare plugin version (will be in .jar).
 
 val apiVersion = "1.19" // Declare minecraft server target version.
 
-/* ----------------------------- Resources ----------------------------- */
+// ----------------------------- Resources -----------------------------
 tasks.named<ProcessResources>("processResources") {
     val props = mapOf("version" to version, "apiVersion" to apiVersion)
     inputs.properties(props) // Indicates to rerun if version changes.
@@ -33,7 +33,7 @@ tasks.named<ProcessResources>("processResources") {
     from("LICENSE") { into("/") } // Bundle licenses into jarfiles.
 }
 
-/* ---------------------------- Repos ---------------------------------- */
+// ---------------------------- Repos ----------------------------------
 repositories {
     mavenCentral() // Import the Maven Central Maven Repository.
     gradlePluginPortal() // Import the Gradle Plugin Portal Maven Repository.
@@ -42,7 +42,7 @@ repositories {
     maven { url = uri("https://maven.enginehub.org/repo/") } // Import the EngineHub Maven Repository.
 }
 
-/* ---------------------- Java project deps ---------------------------- */
+// ---------------------- Java project deps ----------------------------
 dependencies {
     compileOnly("org.purpurmc.purpur:purpur-api:1.19.4-R0.1-SNAPSHOT") // Declare Purpur API version to be packaged.
     compileOnly("net.luckperms:api:5.4") // Import LuckPerms API.
@@ -54,13 +54,13 @@ dependencies {
     compileOnlyApi(project(":libs:NoClip-OG")) // Import NoClip-OG gamemode policy (from source).
 }
 
-/* ---------------------- Reproducible jars ---------------------------- */
+// ---------------------- Reproducible jars ----------------------------
 tasks.withType<AbstractArchiveTask>().configureEach { // Ensure reproducible .jars
     isPreserveFileTimestamps = false
     isReproducibleFileOrder = true
 }
 
-/* ----------------------------- Shadow -------------------------------- */
+// ----------------------------- Shadow --------------------------------
 tasks.shadowJar {
     exclude("io.github.miniplaceholders.*") // Exclude the MiniPlaceholders package from being shadowed.
     isEnableRelocation = true
@@ -73,7 +73,7 @@ tasks.jar { archiveClassifier.set("part") } // Applies to root jarfile only.
 
 tasks.build { dependsOn(tasks.spotlessApply, tasks.shadowJar) } // Build depends on spotless and shadow.
 
-/* --------------------------- Javac opts ------------------------------- */
+// --------------------------- Javac opts -------------------------------
 tasks.withType<JavaCompile>().configureEach {
     options.compilerArgs.add("-parameters") // Enable reflection for java code.
     options.isFork = true // Run javac in its own process.
@@ -81,7 +81,7 @@ tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8" // Use UTF-8 file encoding.
 }
 
-/* ----------------------------- Auto Formatting ------------------------ */
+// ----------------------------- Auto Formatting ------------------------
 spotless {
     java {
         eclipse().configFile("config/formatter/eclipse-java-formatter.xml") // Eclipse java formatting.

@@ -41,9 +41,6 @@ public final class LoginMigrationService {
     private final ReturnLocationStore returnLocationStore;
     private final FlightSnapshotStore flightSnapshotStore;
     private final GamemodePolicy gamemodePolicy;
-    // Null without GameModeInventories-OG; creative is then never promoted back
-    // after a rescue, because only its machinery swaps inventories safely.
-    private final GamemodeAuthority gamemodeAuthority;
     private final ManagedWorlds managedWorlds;
     private final FallProtection fallProtection;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
@@ -55,8 +52,7 @@ public final class LoginMigrationService {
 
     public LoginMigrationService(SpawnOG plugin, AutopsyMigrationStore migrationStore,
             ReturnLocationStore returnLocationStore, FlightSnapshotStore flightSnapshotStore,
-            GamemodePolicy gamemodePolicy, GamemodeAuthority gamemodeAuthority, ManagedWorlds managedWorlds,
-            FallProtection fallProtection)
+            GamemodePolicy gamemodePolicy, ManagedWorlds managedWorlds, FallProtection fallProtection)
     {
 
         this.plugin = plugin;
@@ -64,7 +60,6 @@ public final class LoginMigrationService {
         this.returnLocationStore = returnLocationStore;
         this.flightSnapshotStore = flightSnapshotStore;
         this.gamemodePolicy = gamemodePolicy;
-        this.gamemodeAuthority = gamemodeAuthority;
         this.managedWorlds = managedWorlds;
         this.fallProtection = fallProtection;
 
@@ -183,6 +178,10 @@ public final class LoginMigrationService {
 
             normalizeGamemode = false;
             autopsyMigration = false;
+            // With the rescue reasons gone and the spot safe, a rescue-only
+            // destination has nothing left to justify the teleport.
+            if (plannedDestination == null && !unsafe)
+                destination = null;
 
         }
 
@@ -358,6 +357,9 @@ public final class LoginMigrationService {
             // The snapshot is only spent once the way back is safely on disk.
             if (offerReturn(player, pending))
                 flightSnapshotStore.clear(player.getUniqueId());
+            if (pending.normalizeGamemode())
+                send(player, "locale.gamemodeNormalized",
+                        "<gold>Your login gamemode was safely returned to survival.</gold>");
 
         } else if (pending.autopsyMigration()) {
 
@@ -382,21 +384,26 @@ public final class LoginMigrationService {
                     Placeholder.unparsed("world", from.getWorld() == null ? "unknown" : from.getWorld().getName()));
             offerReturn(player, pending);
 
-        } else if (pending.normalizeGamemode()) {
+        } else {
 
-            send(player, "locale.gamemodeNormalized",
-                    "<gold>Your login gamemode was safely returned to survival.</gold>");
+            // Not exclusive: a rescue away from an unsafe spot and a gamemode
+            // normalization can both apply, and each deserves its own notice.
+            if (pending.unsafe()) {
 
-        } else if (pending.unsafe()) {
+                Location from = pending.originalLocation();
+                send(player, "locale.unsafeLogin",
+                        "<gold>You logged in at an unsafe location (<red><x>, <y>, <z></red> in <world>) and were teleported to spawn.</gold>",
+                        Placeholder.unparsed("x", String.valueOf(from.getBlockX())),
+                        Placeholder.unparsed("y", String.valueOf(from.getBlockY())),
+                        Placeholder.unparsed("z", String.valueOf(from.getBlockZ())),
+                        Placeholder.unparsed("world", from.getWorld() == null ? "unknown" : from.getWorld().getName()));
+                offerReturn(player, pending);
 
-            Location from = pending.originalLocation();
-            send(player, "locale.unsafeLogin",
-                    "<gold>You logged in at an unsafe location (<red><x>, <y>, <z></red> in <world>) and were teleported to spawn.</gold>",
-                    Placeholder.unparsed("x", String.valueOf(from.getBlockX())),
-                    Placeholder.unparsed("y", String.valueOf(from.getBlockY())),
-                    Placeholder.unparsed("z", String.valueOf(from.getBlockZ())),
-                    Placeholder.unparsed("world", from.getWorld() == null ? "unknown" : from.getWorld().getName()));
-            offerReturn(player, pending);
+            }
+
+            if (pending.normalizeGamemode())
+                send(player, "locale.gamemodeNormalized",
+                        "<gold>Your login gamemode was safely returned to survival.</gold>");
 
         }
 
@@ -416,18 +423,7 @@ public final class LoginMigrationService {
         if (!gamemodePolicy.mayUse(player, original, player.getLocation()))
             return;
 
-        boolean promoted;
-        if (gamemodeAuthority != null)
-            promoted = gamemodeAuthority.changeGameMode(player, original);
-        else if (original == GameMode.SPECTATOR) {
-
-            player.setGameMode(original);
-            promoted = player.getGameMode() == original;
-
-        } else
-            promoted = false;
-
-        if (!promoted)
+        if (flightRestorer == null || !flightRestorer.promoteGamemode(player, original))
             plugin.getLogger().warning("Unable to return " + player.getName() + " to " + original.name()
                     + " after their rescue; they remain in " + player.getGameMode().name() + ".");
 

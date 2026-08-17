@@ -303,9 +303,8 @@ public final class RegionFlightService implements Listener {
         if (releaseGamemodeFlyer(player))
             return;
 
-        // The LOWEST-priority quit snapshot already holds the airborne evidence,
-        // so grounding loses nothing. Loan before override: a loan is never saved as
-        // owned.
+        // The LOWEST quit snapshot already holds the airborne evidence, so grounding
+        // loses nothing. Loan before override: a loan is never saved as owned.
         revokeLandingGrant(player);
         restoreOverride(player, flightOverrides.get(player.getUniqueId()));
 

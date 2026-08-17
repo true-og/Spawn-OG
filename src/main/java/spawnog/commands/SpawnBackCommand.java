@@ -1,12 +1,14 @@
 package spawnog.commands;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -103,10 +105,11 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
                     "<gold>You were moved from <red><x>, <y>, <z></red> in <world> because <red><reason></red>. Run <click:run_command:'/spawnback'><hover:show_text:'<gold>Click to run <red>/spawnback</red> again</gold>'><red>/spawnback</red></hover></click> again within <seconds> seconds to go back anyway; you may take damage or die.</gold>",
                     coordinates(point), Placeholder.unparsed("reason", point.reason()),
                     Placeholder.unparsed("seconds", String.valueOf(confirmSeconds)));
-            // A flyer headed for a spot that no longer permits their flight is
-            // warned of the drop; a sanctioned live spectator cannot fall.
+            // A flyer is warned of the drop unless flight or their gamemode comes
+            // back at the return point; a sanctioned live spectator cannot fall.
             if (point.mode() != FlightMode.NONE
-                    && !flightRestorer.canResumeInPlace(point.mode(), player, point.location()))
+                    && !flightRestorer.canResumeInPlace(point.mode(), player, point.location())
+                    && !flightRestorer.canPromoteGamemode(player, point.gamemode(), point.location()))
                 send(player, "locale.spawnbackFallWarning",
                         "<gold>You can no longer fly there, so you will fall; a one-time fall protection will cover the landing.</gold>");
             return true;
@@ -120,8 +123,17 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
         if (point.mode() == FlightMode.NONE) {
 
             Location cleared = LocationSafety.clearAbove(recorded);
-            if (cleared != null)
-                destination = cleared;
+            // A fully sealed column has no survivable spot: refuse and keep the
+            // record rather than teleporting the player into solid blocks.
+            if (cleared == null) {
+
+                send(player, "locale.returnBlocked",
+                        "<red>The spot you left is sealed inside solid blocks, so you cannot return there right now.</red>");
+                return true;
+
+            }
+
+            destination = cleared;
 
         }
 
@@ -136,6 +148,11 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
             plugin.getServer().getScheduler().runTask(plugin, () -> {
 
+                // Gone mid-teleport: keep the one-shot record and grant nothing,
+                // or the fall immunity cleared on quit would leak to the next join.
+                if (!player.isOnline())
+                    return;
+
                 if (!Boolean.TRUE.equals(success) || error != null) {
 
                     send(player, "locale.returnFailed", "<red>Your return teleport failed.</red>");
@@ -147,10 +164,29 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
                 // warning means protection; a sanctioned spectator is left as is.
                 boolean restored = flightRestorer.canResumeInPlace(point.mode(), player, player.getLocation())
                         && flightRestorer.resumeInPlace(point.mode(), player);
+
+                // Flight could not come back, but the recorded gamemode still
+                // might: a standing creative or spectator is promoted where allowed.
+                GameMode gamemode = point.gamemode();
+                boolean wantsGamemode = gamemode == GameMode.CREATIVE || gamemode == GameMode.SPECTATOR;
+                if (!restored && wantsGamemode && flightRestorer.promoteGamemode(player, gamemode)) {
+
+                    restored = true;
+                    if (gamemode == GameMode.CREATIVE && point.allowFlight() && !player.getAllowFlight())
+                        player.setAllowFlight(true);
+                    if (gamemode == GameMode.CREATIVE && point.flying() && player.getAllowFlight())
+                        player.setFlying(true);
+
+                }
+
                 if (!restored) {
 
                     fallProtection.grant(player);
-                    if (point.mode() != FlightMode.NONE)
+                    if (wantsGamemode)
+                        send(player, "locale.returnGamemodeDenied",
+                                "<gold>You don't have the authority to be in <red><gamemode></red> here, so you stay in survival.</gold>",
+                                Placeholder.unparsed("gamemode", gamemode.name().toLowerCase(Locale.ROOT)));
+                    else if (point.mode() != FlightMode.NONE)
                         send(player, "locale.returnFlightDenied",
                                 "<gold>You don't have the authority to fly here.</gold>");
 
