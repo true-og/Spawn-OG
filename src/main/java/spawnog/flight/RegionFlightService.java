@@ -71,6 +71,9 @@ public final class RegionFlightService implements Listener {
         this.fallProtection = fallProtection;
         loginMigrationService.addCompletionListener(this::scheduleRefresh);
         loadRules();
+        // A reload re-enables with players already online; nothing else would
+        // reconcile them until they cross a block boundary.
+        plugin.getServer().getOnlinePlayers().forEach(this::scheduleRefresh);
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::spawnFlightParticles, PARTICLE_INITIAL_DELAY_TICKS,
                 PARTICLE_PERIOD_TICKS);
 
@@ -80,12 +83,19 @@ public final class RegionFlightService implements Listener {
 
         if (player == null || !hasFlightPermission(player))
             return false;
+        // Creative and spectator flight is gamemode-derived; the regional
+        // toggle must neither capture nor strip it.
+        if (isGamemodeFlyer(player))
+            return false;
         RegionRule rule = currentRule(player);
         return rule != null && rule.kind() == RuleKind.FLY;
 
     }
 
     public boolean toggleFlight(Player player) {
+
+        if (isGamemodeFlyer(player))
+            return player.getAllowFlight();
 
         RegionRule rule = currentRule(player);
         if (rule == null || rule.kind() != RuleKind.FLY)
@@ -106,16 +116,10 @@ public final class RegionFlightService implements Listener {
         }
 
         boolean enable = !player.getAllowFlight();
-        if (enable) {
-
+        if (enable)
             player.setAllowFlight(true);
-
-        } else {
-
-            stopFlyingSafely(player);
-            player.setAllowFlight(false);
-
-        }
+        else
+            lowerFlight(player);
 
         if (player.getAllowFlight() == originalAllowFlight) {
 
@@ -234,6 +238,15 @@ public final class RegionFlightService implements Listener {
             if (previous != null && previous.kind() == RuleKind.NOFLY)
                 restoreOverride(player, previous);
             previous = flightOverrides.get(playerId);
+            // Re-validated on every judgment: a permission that expired
+            // mid-session must not keep regional flight alive.
+            if (previous != null && previous.kind() == RuleKind.FLY && !hasFlightPermission(player)) {
+
+                restoreOverride(player, previous);
+                return;
+
+            }
+
             if (previous == null) {
 
                 rearmPersistedFlight(player, rule);
@@ -245,9 +258,10 @@ public final class RegionFlightService implements Listener {
 
                 if (player.getAllowFlight() != previous.appliedAllowFlight()) {
 
-                    if (!previous.appliedAllowFlight())
-                        stopFlyingSafely(player);
-                    player.setAllowFlight(previous.appliedAllowFlight());
+                    if (previous.appliedAllowFlight())
+                        player.setAllowFlight(true);
+                    else
+                        lowerFlight(player);
 
                 }
 
@@ -287,12 +301,8 @@ public final class RegionFlightService implements Listener {
 
         }
 
-        if (player.getAllowFlight()) {
-
-            stopFlyingSafely(player);
-            player.setAllowFlight(false);
-
-        }
+        if (player.getAllowFlight())
+            lowerFlight(player);
 
     }
 
@@ -314,8 +324,7 @@ public final class RegionFlightService implements Listener {
     // bookkeeping is dropped, not applied, so overrides neither ground nor leak.
     private boolean releaseGamemodeFlyer(Player player) {
 
-        GameMode gamemode = player.getGameMode();
-        if (gamemode != GameMode.CREATIVE && gamemode != GameMode.SPECTATOR)
+        if (!isGamemodeFlyer(player))
             return false;
 
         landingGrants.remove(player.getUniqueId());
@@ -324,19 +333,34 @@ public final class RegionFlightService implements Listener {
 
     }
 
+    private static boolean isGamemodeFlyer(Player player) {
+
+        GameMode gamemode = player.getGameMode();
+        return gamemode == GameMode.CREATIVE || gamemode == GameMode.SPECTATOR;
+
+    }
+
     public void close() {
 
-        Set<UUID> granted = new HashSet<>(landingGrants);
-        granted.addAll(flightOverrides.keySet());
-        // Through restore(), so a shutdown records the players it grounds exactly
-        // like a disconnect does.
-        granted.forEach(playerId -> {
+        // On shutdown the players are saved after plugins disable, so grounding
+        // keeps plugin-granted flight out of their playerdata. On a bare reload
+        // they stay in the world with every listener gone: grounding them
+        // mid-air would be a drop no protection can cover, so flight is left
+        // standing for the next enable to reconcile.
+        if (plugin.getServer().isStopping()) {
 
-            Player player = plugin.getServer().getPlayer(playerId);
-            if (player != null)
-                restore(player);
+            Set<UUID> granted = new HashSet<>(landingGrants);
+            granted.addAll(flightOverrides.keySet());
+            granted.forEach(playerId -> {
 
-        });
+                Player player = plugin.getServer().getPlayer(playerId);
+                if (player != null)
+                    restore(player);
+
+            });
+
+        }
+
         flightOverrides.clear();
         landingGrants.clear();
         scheduledRefreshes.clear();
@@ -360,9 +384,16 @@ public final class RegionFlightService implements Listener {
     @EventHandler
     public void onChangedWorld(PlayerChangedWorldEvent event) {
 
-        // Essentials-OG resets flight during this same event. Reconcile one tick
-        // later so Spawn-OG remains the final authority for regional flight.
-        scheduleRefresh(event.getPlayer());
+        Player player = event.getPlayer();
+        UUID playerId = player.getUniqueId();
+        // Essentials-OG resets flight during this same event, before or after
+        // this handler; a tracked flyer arriving airborne gets one covered
+        // landing no matter who strips the ability first.
+        if ((flightOverrides.containsKey(playerId) || landingGrants.contains(playerId)) && !isOnSafeSurface(player))
+            fallProtection.grant(player);
+        // Reconcile one tick later so Spawn-OG remains the final authority for
+        // regional flight.
+        scheduleRefresh(player);
 
     }
 
@@ -534,8 +565,7 @@ public final class RegionFlightService implements Listener {
 
         if (!landingGrants.remove(player.getUniqueId()))
             return;
-        stopFlyingSafely(player);
-        player.setAllowFlight(false);
+        lowerFlight(player);
 
     }
 
@@ -543,22 +573,41 @@ public final class RegionFlightService implements Listener {
 
         if (state == null)
             return;
-        if (player.isFlying() && !state.originalAllowFlight())
-            stopFlyingSafely(player);
-        if (player.getAllowFlight() != state.originalAllowFlight())
-            player.setAllowFlight(state.originalAllowFlight());
         flightOverrides.remove(player.getUniqueId());
+
+        if (!state.originalAllowFlight()) {
+
+            // The revoke fires on the ability mismatch alone, so the grant
+            // must too, not only for a currently engaged flyer.
+            if (player.getAllowFlight() || player.isFlying())
+                lowerFlight(player);
+
+        } else if (!player.getAllowFlight()) {
+
+            player.setAllowFlight(true);
+
+        }
 
     }
 
-    private void stopFlyingSafely(Player player) {
+    // The single revoke path. Vanilla suppresses fall damage while allowFlight
+    // is set but keeps accumulating fallDistance, so taking the ability from an
+    // airborne player makes the whole dormant drop live: protection is owed
+    // whenever the player is off the ground, engaged in flight or not.
+    private void lowerFlight(Player player) {
 
-        if (player.isFlying()) {
+        if (player.isFlying() || player.getFallDistance() > 0.0F || !isOnSafeSurface(player)) {
 
             fallProtection.grant(player);
-            player.setFlying(false);
+            // The revoke is what turns the suppressed part of the drop into
+            // live damage; forgiving it keeps parity with landing under flight.
+            player.setFallDistance(0.0F);
 
         }
+
+        if (player.isFlying())
+            player.setFlying(false);
+        player.setAllowFlight(false);
 
     }
 

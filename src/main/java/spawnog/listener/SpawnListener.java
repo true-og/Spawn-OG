@@ -59,7 +59,9 @@ public class SpawnListener implements Listener {
 
     }
 
-    @EventHandler
+    // ignoreCancelled: a cancelled kick leaves the player online mid-rescue;
+    // tearing the transaction down would orphan it with no reconciliation.
+    @EventHandler(ignoreCancelled = true)
     public void onKick(PlayerKickEvent e) {
 
         loginMigration.cancel(e.getPlayer());

@@ -4,14 +4,24 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
+import org.bukkit.GameMode;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.Tag;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByBlockEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityToggleGlideEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerGameModeChangeEvent;
 import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
+import org.spigotmc.event.entity.EntityMountEvent;
 
 import spawnog.login.LocationSafety;
 
@@ -21,8 +31,8 @@ public final class FallProtection implements Listener {
 
     private final Set<UUID> immune = new HashSet<>();
 
-    // Held until the player is standing on something, so an arbitrarily long
-    // drop is covered, and spent on the first fall damage that lands.
+    // Scoped to the one fall the plugin caused: spent on its landing, cleared
+    // by whatever else ends it. Never a clock, so normal damage resumes then.
     public void grant(Player player) {
 
         if (player != null)
@@ -43,28 +53,95 @@ public final class FallProtection implements Listener {
 
     }
 
-    // Cancelled elsewhere already, so the protection is still owed and is not
-    // spent on a fall that was never going to hurt.
-    @EventHandler(ignoreCancelled = true)
+    // HIGHEST + ignoreCancelled: a cancelled event spends nothing, and little
+    // runs after us that could un-cancel our own cancellation.
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onDamage(EntityDamageEvent event) {
 
-        if (event.getCause() != EntityDamageEvent.DamageCause.FALL || !(event.getEntity() instanceof Player player))
+        if (!(event.getEntity() instanceof Player player) || !isLandingDamage(event))
             return;
+        // Cancelled even at zero final damage, so the plugin-caused landing
+        // costs no hurt animation or absorption hearts either.
         if (immune.remove(player.getUniqueId()))
             event.setCancelled(true);
 
     }
 
-    @EventHandler
+    @EventHandler(ignoreCancelled = true)
     public void onMove(PlayerMoveEvent event) {
 
-        if (immune.isEmpty())
+        if (immune.isEmpty() || event.getTo() == null)
             return;
 
         Player player = event.getPlayer();
-        if (immune.contains(player.getUniqueId()) && !player.isFlying()
-                && LocationSafety.isSupported(player.getLocation()))
+        if (!immune.contains(player.getUniqueId()))
+            return;
+        // getTo(): getLocation() is pre-move and this packet's damage fires
+        // after us; positive fallDistance tells a live fall from a landing.
+        if (!player.isFlying() && player.getFallDistance() <= 0.0F && holdsThePlayer(event.getTo()))
             immune.remove(player.getUniqueId());
+
+    }
+
+    // Grabbing a ladder or vine ends a fall just like ground or water does.
+    private static boolean holdsThePlayer(Location to) {
+
+        return LocationSafety.isSupported(to) || Tag.CLIMBABLE.isTagged(to.getBlock().getType());
+
+    }
+
+    // Deploying elytra takes control of the descent: the owed fall is over
+    // and the grant must not bank for a dive somewhere else.
+    @EventHandler(ignoreCancelled = true)
+    public void onToggleGlide(EntityToggleGlideEvent event) {
+
+        if (event.isGliding() && event.getEntity() instanceof Player player)
+            clear(player);
+
+    }
+
+    // A mount catches the fall; any later fall damage belongs to the ride.
+    @EventHandler(ignoreCancelled = true)
+    public void onMount(EntityMountEvent event) {
+
+        if (event.getEntity() instanceof Player player)
+            clear(player);
+
+    }
+
+    // A teleport abandons the owed drop; Spawn-OG's own grants all land at
+    // least a tick after their teleport event, so this never eats one.
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleport(PlayerTeleportEvent event) {
+
+        clear(event.getPlayer());
+
+    }
+
+    // Losing creative or spectator mid-air strips flight inside vanilla, with
+    // no plugin call to intercept, so protection is granted on the change itself.
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onGameModeChange(PlayerGameModeChangeEvent event) {
+
+        Player player = event.getPlayer();
+        GameMode from = player.getGameMode();
+        if (from != GameMode.CREATIVE && from != GameMode.SPECTATOR)
+            return;
+
+        GameMode to = event.getNewGameMode();
+        if (to == GameMode.CREATIVE || to == GameMode.SPECTATOR)
+            return;
+        if (!LocationSafety.isSupported(player.getLocation()))
+            grant(player);
+
+    }
+
+    // A death ends whatever fall was owed; the grant must not survive into the
+    // next life and absorb an unrelated fall there.
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onDeath(PlayerDeathEvent event) {
+
+        clear(event.getEntity());
 
     }
 
@@ -77,10 +154,25 @@ public final class FallProtection implements Listener {
 
     }
 
-    @EventHandler(priority = EventPriority.MONITOR)
+    // ignoreCancelled: a cancelled kick leaves the player online and possibly
+    // still falling, so the protection is still owed.
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onKick(PlayerKickEvent event) {
 
         clear(event.getPlayer());
+
+    }
+
+    // A stalagmite landing is CONTACT, not FALL, and is the most damaging way a
+    // plugin-caused drop can end; both are outcomes of losing flight in the air.
+    private static boolean isLandingDamage(EntityDamageEvent event) {
+
+        if (event.getCause() == EntityDamageEvent.DamageCause.FALL)
+            return true;
+
+        return event.getCause() == EntityDamageEvent.DamageCause.CONTACT
+                && event instanceof EntityDamageByBlockEvent byBlock && byBlock.getDamager() != null
+                && byBlock.getDamager().getType() == Material.POINTED_DRIPSTONE;
 
     }
 

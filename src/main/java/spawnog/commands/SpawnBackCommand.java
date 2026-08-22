@@ -181,7 +181,10 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
                 if (!restored) {
 
-                    fallProtection.grant(player);
+                    // Inert while another authority still allows flight;
+                    // granted only when the landing can actually hurt.
+                    if (!player.getAllowFlight())
+                        fallProtection.grant(player);
                     if (wantsGamemode)
                         send(player, "locale.returnGamemodeDenied",
                                 "<gold>You don't have the authority to be in <red><gamemode></red> here, so you stay in survival.</gold>",

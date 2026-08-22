@@ -15,6 +15,7 @@ import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
+import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
 
 import spawnog.SpawnOG;
@@ -45,6 +46,9 @@ public final class LoginMigrationService {
     private final FallProtection fallProtection;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final Map<UUID, PendingLogin> pendingLogins = new HashMap<>();
+    // One live grace timer per player: an older timer firing late must never
+    // strip the invulnerability a newer protection still relies on.
+    private final Map<UUID, GraceProtection> graceProtections = new HashMap<>();
     private final List<Consumer<Player>> completionListeners = new ArrayList<>();
     // Decides how a rescued flyer gets flight back. Set after construction
     // because it is built around the flight service, which takes this service.
@@ -107,9 +111,22 @@ public final class LoginMigrationService {
             // the join tick, and a flyer they briefly grounded must not fall.
             plugin.getServer().getScheduler().runTask(plugin, () -> {
 
-                if (player.isOnline() && player.getAllowFlight() && !player.isFlying()
-                        && !LocationSafety.isSupported(player.getLocation()))
-                    player.setFlying(true);
+                if (!player.isOnline() || LocationSafety.isSupported(player.getLocation()))
+                    return;
+
+                if (player.getAllowFlight()) {
+
+                    if (!player.isFlying())
+                        player.setFlying(true);
+
+                } else {
+
+                    // Another plugin stripped the flight the rescue resumed;
+                    // the fall it caused is at least covered.
+                    fallProtection.grant(player);
+                    player.setFallDistance(0.0F);
+
+                }
 
             });
             flightSnapshotStore.clear(player.getUniqueId());
@@ -153,8 +170,6 @@ public final class LoginMigrationService {
         // Any non-survival login is normalized unless the player is entitled to
         // that gamemode where they logged in; being staff is not enough on its own.
         boolean mayKeepGamemode = gamemodePolicy.mayUse(player, originalGamemode, player.getLocation());
-        boolean normalizeGamemode = managedWorld && !mayKeepGamemode
-                && plugin.getConfig().getBoolean("login-safety.normalize-non-staff-gamemode", true);
         // Minigames put players into spectator legitimately, so an arena
         // disconnect must not burn the one-shot flag or record the arena.
         boolean minigameArena = MinigameArenas.contains(player);
@@ -162,6 +177,10 @@ public final class LoginMigrationService {
                 && originalGamemode == GameMode.SPECTATOR
                 && plugin.getConfig().getBoolean("login-safety.autopsy-migration.enabled", true)
                 && !migrationStore.hasMigrated(player.getUniqueId());
+        // The one-shot autopsy migration always ends in survival; the normalize
+        // config governs only ordinary logins.
+        boolean normalizeGamemode = autopsyMigration || managedWorld && !mayKeepGamemode
+                && plugin.getConfig().getBoolean("login-safety.normalize-non-staff-gamemode", true);
         boolean vulnerableAfterLogin = normalizeGamemode || originalGamemode == GameMode.SURVIVAL
                 || originalGamemode == GameMode.ADVENTURE;
         LocationSafety.Issue issue = vulnerableAfterLogin ? LocationSafety.check(player.getLocation())
@@ -212,6 +231,9 @@ public final class LoginMigrationService {
         PendingLogin pending = pendingLogins.remove(player.getUniqueId());
         if (pending != null)
             player.setInvulnerable(pending.originalInvulnerable());
+        // Restored on the way out, or the grace invulnerability would be saved
+        // into playerdata and carried into the next session.
+        cancelGrace(player, true);
 
     }
 
@@ -244,6 +266,18 @@ public final class LoginMigrationService {
         });
         pendingLogins.clear();
 
+        // The timers die with the plugin; without this the invulnerability
+        // they were due to lift would persist through playerdata forever.
+        graceProtections.forEach((playerId, grace) -> {
+
+            grace.task().cancel();
+            Player player = plugin.getServer().getPlayer(playerId);
+            if (player != null)
+                player.setInvulnerable(grace.originalInvulnerable());
+
+        });
+        graceProtections.clear();
+
     }
 
     private void beginTransaction(Player player, Location destination, PendingLogin pending) {
@@ -254,6 +288,9 @@ public final class LoginMigrationService {
 
         pendingLogins.put(playerId, pending);
 
+        // The transaction owns the invulnerability flag from here; a stale
+        // grace timer must not lift it mid-rescue.
+        cancelGrace(player, false);
         player.setInvulnerable(true);
         player.setFallDistance(0.0F);
         player.setVelocity(new Vector());
@@ -280,8 +317,15 @@ public final class LoginMigrationService {
     private void complete(Player player, boolean teleportSucceeded, Throwable teleportError) {
 
         PendingLogin pending = pendingLogins.remove(player.getUniqueId());
-        if (pending == null)
+        if (pending == null) {
+
+            // A cancelled transaction still ends: the listeners reconcile a
+            // player who is still here, or flight is never judged at all.
+            if (player.isOnline())
+                completionListeners.forEach(listener -> listener.accept(player));
             return;
+
+        }
 
         try {
 
@@ -324,6 +368,9 @@ public final class LoginMigrationService {
             if (player.isFlying())
                 player.setFlying(false);
             player.setFallDistance(0.0F);
+            // The residual drop at the destination (up to the survivable five
+            // blocks) lands after invulnerability is lifted; cover it.
+            fallProtection.grant(player);
             player.setGameMode(GameMode.SURVIVAL);
             if (player.getGameMode() != GameMode.SURVIVAL) {
 
@@ -472,13 +519,29 @@ public final class LoginMigrationService {
         player.setFallDistance(0.0F);
         player.setInvulnerable(true);
 
+        // A newer grace supersedes an older one instead of racing it.
+        cancelGrace(player, false);
+        UUID playerId = player.getUniqueId();
         int graceSeconds = plugin.getConfig().getInt("login-safety.failed-rescue-grace-seconds", DEFAULT_GRACE_SECONDS);
-        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+        BukkitTask task = plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
 
+            graceProtections.remove(playerId);
             if (player.isOnline())
                 player.setInvulnerable(originalInvulnerable);
 
         }, graceSeconds * 20L);
+        graceProtections.put(playerId, new GraceProtection(task, originalInvulnerable));
+
+    }
+
+    private void cancelGrace(Player player, boolean restore) {
+
+        GraceProtection grace = graceProtections.remove(player.getUniqueId());
+        if (grace == null)
+            return;
+        grace.task().cancel();
+        if (restore)
+            player.setInvulnerable(grace.originalInvulnerable());
 
     }
 
@@ -536,6 +599,11 @@ public final class LoginMigrationService {
         Component component = miniMessage.deserialize(message, placeholders);
         player.sendMessage(component);
 
+    }
+
+    // The invulnerability a failed rescue holds open, with the value the timer
+    // owes back when it lifts.
+    private record GraceProtection(BukkitTask task, boolean originalInvulnerable) {
     }
 
     // snapshot is non-null only for an airborne rescue, and then carries the
