@@ -7,6 +7,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 import spawnog.SpawnOG;
+import spawnog.login.LoginMigrationService;
 import spawnog.login.NoClipAuthority;
 
 // Captures the flight snapshot at LOWEST, before grounding and NoClip cleanup.
@@ -16,16 +17,18 @@ public final class FlightQuitListener implements Listener {
     private final SpawnOG plugin;
     private final FlightSnapshotStore snapshotStore;
     private final FlightIntentStore flightIntentStore;
+    private final LoginMigrationService loginMigrationService;
     // Null when NoClip-OG is not installed.
     private final NoClipAuthority noClipAuthority;
 
     public FlightQuitListener(SpawnOG plugin, FlightSnapshotStore snapshotStore, FlightIntentStore flightIntentStore,
-            NoClipAuthority noClipAuthority)
+            LoginMigrationService loginMigrationService, NoClipAuthority noClipAuthority)
     {
 
         this.plugin = plugin;
         this.snapshotStore = snapshotStore;
         this.flightIntentStore = flightIntentStore;
+        this.loginMigrationService = loginMigrationService;
         this.noClipAuthority = noClipAuthority;
 
     }
@@ -44,16 +47,20 @@ public final class FlightQuitListener implements Listener {
         if (player.isFlying())
             snapshotStore.record(player, noClipAuthority != null && noClipAuthority.isNoClipping(player.getUniqueId()),
                     flightIntentStore.contains(player.getUniqueId()));
-        else
+        // A pending rescue holds the airborne evidence: the player is not
+        // flying mid-transaction, and clearing would erase the retry.
+        else if (loginMigrationService == null || !loginMigrationService.isPending(player))
             snapshotStore.clear(player.getUniqueId());
 
     }
 
     // Replays the quit capture for everyone online, so a /reload or shutdown
     // that skips quit events records flyers before the flight service revokes.
+    // Batched: per-player writes would rewrite the whole file once each.
     public void captureAll() {
 
-        plugin.getServer().getOnlinePlayers().forEach(this::capture);
+        snapshotStore.batch("shutdown flight snapshots",
+                () -> plugin.getServer().getOnlinePlayers().forEach(this::capture));
 
     }
 

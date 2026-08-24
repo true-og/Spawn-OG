@@ -1,9 +1,10 @@
 package spawnog.teleport;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
+import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -29,14 +30,16 @@ import spawnog.login.LocationSafety;
 // regional flight so it works without permissions, regions, or WorldGuard.
 public final class FallProtection implements Listener {
 
-    private final Set<UUID> immune = new HashSet<>();
+    // The grant's tick guards it against being cleared by a teleport fired in
+    // the very dispatch that granted it (a setback during the same move event).
+    private final Map<UUID, Integer> immune = new HashMap<>();
 
     // Scoped to the one fall the plugin caused: spent on its landing, cleared
     // by whatever else ends it. Never a clock, so normal damage resumes then.
     public void grant(Player player) {
 
         if (player != null)
-            immune.add(player.getUniqueId());
+            immune.put(player.getUniqueId(), Bukkit.getCurrentTick());
 
     }
 
@@ -62,7 +65,7 @@ public final class FallProtection implements Listener {
             return;
         // Cancelled even at zero final damage, so the plugin-caused landing
         // costs no hurt animation or absorption hearts either.
-        if (immune.remove(player.getUniqueId()))
+        if (immune.remove(player.getUniqueId()) != null)
             event.setCancelled(true);
 
     }
@@ -74,7 +77,7 @@ public final class FallProtection implements Listener {
             return;
 
         Player player = event.getPlayer();
-        if (!immune.contains(player.getUniqueId()))
+        if (!immune.containsKey(player.getUniqueId()))
             return;
         // getTo(): getLocation() is pre-move and this packet's damage fires
         // after us; positive fallDistance tells a live fall from a landing.
@@ -90,9 +93,9 @@ public final class FallProtection implements Listener {
 
     }
 
-    // Deploying elytra takes control of the descent: the owed fall is over
-    // and the grant must not bank for a dive somewhere else.
-    @EventHandler(ignoreCancelled = true)
+    // MONITOR: a mount or glide another plugin cancels never happened, and
+    // the protection is then still owed for the ongoing fall.
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onToggleGlide(EntityToggleGlideEvent event) {
 
         if (event.isGliding() && event.getEntity() instanceof Player player)
@@ -101,7 +104,7 @@ public final class FallProtection implements Listener {
     }
 
     // A mount catches the fall; any later fall damage belongs to the ride.
-    @EventHandler(ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onMount(EntityMountEvent event) {
 
         if (event.getEntity() instanceof Player player)
@@ -109,12 +112,16 @@ public final class FallProtection implements Listener {
 
     }
 
-    // A teleport abandons the owed drop; Spawn-OG's own grants all land at
-    // least a tick after their teleport event, so this never eats one.
+    // A teleport abandons the owed drop; portals fire a plain teleport event
+    // too, so this also covers them.
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onTeleport(PlayerTeleportEvent event) {
 
-        clear(event.getPlayer());
+        // A grant made earlier in this same dispatch (a setback teleport fired
+        // from inside a move event) is still owed and survives.
+        Integer grantedTick = immune.get(event.getPlayer().getUniqueId());
+        if (grantedTick != null && grantedTick != Bukkit.getCurrentTick())
+            clear(event.getPlayer());
 
     }
 
@@ -124,14 +131,20 @@ public final class FallProtection implements Listener {
     public void onGameModeChange(PlayerGameModeChangeEvent event) {
 
         Player player = event.getPlayer();
+        GameMode to = event.getNewGameMode();
+        // Gamemode flight makes falls harmless; an unspent grant must not ride
+        // along and absorb some later survival fall.
+        if (to == GameMode.CREATIVE || to == GameMode.SPECTATOR) {
+
+            clear(player);
+            return;
+
+        }
+
         GameMode from = player.getGameMode();
         if (from != GameMode.CREATIVE && from != GameMode.SPECTATOR)
             return;
-
-        GameMode to = event.getNewGameMode();
-        if (to == GameMode.CREATIVE || to == GameMode.SPECTATOR)
-            return;
-        if (!LocationSafety.isSupported(player.getLocation()))
+        if (!player.isInsideVehicle() && !LocationSafety.isSupported(player.getLocation()))
             grant(player);
 
     }

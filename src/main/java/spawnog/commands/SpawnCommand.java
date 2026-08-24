@@ -2,12 +2,12 @@ package spawnog.commands;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.luckperms.api.LuckPerms;
 import net.luckperms.api.model.user.User;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.command.*;
-import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -17,7 +17,7 @@ import spawnog.teleport.SpawnWarmupService;
 public class SpawnCommand implements CommandExecutor, TabCompleter {
 
     private final SpawnOG plugin = SpawnOG.getInstance();
-    private final FileConfiguration cfg = plugin.getConfig();
+    private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final SpawnWarmupService warmupService;
 
     public SpawnCommand(SpawnWarmupService warmupService) {
@@ -37,8 +37,7 @@ public class SpawnCommand implements CommandExecutor, TabCompleter {
                 return false;
             if (!p.hasPermission(cmd.getPermission())) {
 
-                sender.sendMessage(
-                        cfg.getString("locale.missingPermission", "You are lacking the required permissions."));
+                send(sender, "locale.missingPermission", "<red>You are lacking the required permissions.</red>");
                 return true;
 
             }
@@ -46,19 +45,19 @@ public class SpawnCommand implements CommandExecutor, TabCompleter {
             Location dest = resolve(p);
             if (dest == null) {
 
-                sender.sendMessage(cfg.getString("locale.spawnNotSet", "Server spawn not set."));
+                send(sender, "locale.spawnNotSet", "<red>Server spawn not set.</red>");
                 return true;
 
             }
 
-            scheduleTeleport(p, dest);
+            warmupService.schedule(p, dest);
             return true;
 
         }
 
         if (!sender.hasPermission("spawnog.spawn.others")) {
 
-            sender.sendMessage(cfg.getString("locale.missingPermission", "You are lacking the required permissions."));
+            send(sender, "locale.missingPermission", "<red>You are lacking the required permissions.</red>");
             return true;
 
         }
@@ -66,7 +65,7 @@ public class SpawnCommand implements CommandExecutor, TabCompleter {
         Player target = Bukkit.getPlayerExact(args[0]);
         if (target == null) {
 
-            sender.sendMessage(cfg.getString("locale.playerNotFound", "Player not found."));
+            send(sender, "locale.playerNotFound", "<red>Player not found.</red>");
             return true;
 
         }
@@ -74,12 +73,14 @@ public class SpawnCommand implements CommandExecutor, TabCompleter {
         Location dest = resolve(target);
         if (dest == null) {
 
-            sender.sendMessage(cfg.getString("locale.spawnNotSet", "Server spawn not set."));
+            send(sender, "locale.spawnNotSet", "<red>Server spawn not set.</red>");
             return true;
 
         }
 
-        scheduleTeleport(target, dest);
+        // No countdown for a pull the target never asked for: their ordinary
+        // walking would cancel it and defeat the staff action.
+        warmupService.teleportNow(target, dest);
         return true;
 
     }
@@ -100,9 +101,10 @@ public class SpawnCommand implements CommandExecutor, TabCompleter {
 
     }
 
-    private void scheduleTeleport(Player player, Location dest) {
+    private void send(CommandSender sender, String path, String fallback) {
 
-        warmupService.schedule(player, dest);
+        String message = plugin.getConfig().getString(path, fallback);
+        sender.sendMessage(miniMessage.deserialize(message));
 
     }
 
@@ -120,13 +122,13 @@ public class SpawnCommand implements CommandExecutor, TabCompleter {
 
         if (group != null) {
 
-            Location g = cfg.getLocation("spawns." + group.toLowerCase() + ".location");
+            Location g = plugin.getConfig().getLocation("spawns." + group.toLowerCase() + ".location");
             if (g != null)
                 return g.clone();
 
         }
 
-        Location def = cfg.getLocation("spawns.global.location");
+        Location def = plugin.getConfig().getLocation("spawns.global.location");
         return def == null ? null : def.clone();
 
     }

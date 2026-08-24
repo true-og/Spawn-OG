@@ -40,7 +40,8 @@ public final class AutopsyMigrationStore extends YamlStore {
         if (save("autopsy migration for " + playerName))
             return true;
 
-        data.set(path, null);
+        // Kept in memory despite the failed write: the one-shot must not re-run
+        // on every login this session, and any later save persists it.
         return false;
 
     }

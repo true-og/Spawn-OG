@@ -18,6 +18,10 @@ public abstract class YamlStore {
     protected final YamlConfiguration data;
 
     private final File file;
+    // While batching, mutations mark dirty instead of writing; the batch's end
+    // performs one write for all of them.
+    private boolean batching;
+    private boolean dirty;
 
     protected YamlStore(SpawnOG plugin, String fileName) {
 
@@ -27,7 +31,44 @@ public abstract class YamlStore {
 
     }
 
+    // Groups many mutations into one write; shutdown sweeps would otherwise
+    // rewrite the whole file once per player. A nested batch folds into the
+    // outer one rather than stealing its dirty flag.
+    public void batch(String description, Runnable mutations) {
+
+        if (batching) {
+
+            mutations.run();
+            return;
+
+        }
+
+        batching = true;
+        dirty = false;
+
+        try {
+
+            mutations.run();
+
+        } finally {
+
+            batching = false;
+            if (dirty)
+                save(description);
+            dirty = false;
+
+        }
+
+    }
+
     protected boolean save(String description) {
+
+        if (batching) {
+
+            dirty = true;
+            return true;
+
+        }
 
         try {
 

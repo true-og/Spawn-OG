@@ -122,7 +122,10 @@ public final class MyWorldsSpawnBridge implements Listener {
 
     private Location configuredSpawn() {
 
-        return plugin.getConfig().getLocation("spawns.global.location");
+        Location spawn = plugin.getConfig().getLocation("spawns.global.location");
+        // Cloned: the config hands out its live instance, and MyWorlds keeping
+        // or mutating it would bend the in-memory config.
+        return spawn == null ? null : spawn.clone();
 
     }
 

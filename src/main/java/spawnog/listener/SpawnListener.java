@@ -1,5 +1,7 @@
 package spawnog.listener;
 
+import java.util.Locale;
+
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
@@ -9,7 +11,10 @@ import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import spawnog.SpawnOG;
+import spawnog.login.LocationSafety;
 import spawnog.login.LoginMigrationService;
+import spawnog.login.MinigameArenas;
+import spawnog.teleport.FallProtection;
 import spawnog.world.ManagedWorlds;
 
 public class SpawnListener implements Listener {
@@ -17,12 +22,16 @@ public class SpawnListener implements Listener {
     private final SpawnOG plugin;
     private final LoginMigrationService loginMigration;
     private final ManagedWorlds managedWorlds;
+    private final FallProtection fallProtection;
 
-    public SpawnListener(SpawnOG plugin, LoginMigrationService loginMigration, ManagedWorlds managedWorlds) {
+    public SpawnListener(SpawnOG plugin, LoginMigrationService loginMigration, ManagedWorlds managedWorlds,
+            FallProtection fallProtection)
+    {
 
         this.plugin = plugin;
         this.loginMigration = loginMigration;
         this.managedWorlds = managedWorlds;
+        this.fallProtection = fallProtection;
 
     }
 
@@ -36,7 +45,7 @@ public class SpawnListener implements Listener {
         Location dest = null;
         if (first) {
 
-            String nb = plugin.getConfig().getString("newbies.spawnpoint", "newbie").toLowerCase();
+            String nb = plugin.getConfig().getString("newbies.spawnpoint", "newbie").toLowerCase(Locale.ROOT);
             dest = plugin.getConfig().getLocation("spawns." + nb + ".location");
             if (dest == null)
                 dest = plugin.getConfig().getLocation("spawns.global.location");
@@ -47,8 +56,12 @@ public class SpawnListener implements Listener {
 
         }
 
+        // Cloned once here: everything downstream may hold or adjust it.
+        if (dest != null)
+            dest = dest.clone();
+
         if (!loginMigration.handleLogin(p, dest) && dest != null)
-            p.teleportAsync(dest.clone());
+            p.teleportAsync(dest);
 
     }
 
@@ -72,6 +85,10 @@ public class SpawnListener implements Listener {
     public void onRespawn(PlayerRespawnEvent e) {
 
         Player p = e.getPlayer();
+        // A minigame death respawns by the minigame's rules, not the SMP's.
+        if (MinigameArenas.contains(p))
+            return;
+
         Location destination = preferred(p, e);
 
         // Bed, home, and configured spawn keep their say only inside governed
@@ -79,8 +96,26 @@ public class SpawnListener implements Listener {
         if (!managedWorlds.contains(destination == null ? null : destination.getWorld()))
             destination = lastManagedSpawn(p);
 
-        if (destination != null)
-            e.setRespawnLocation(destination);
+        if (destination == null)
+            return;
+
+        // Lifted out of anything built over it since it was recorded.
+        Location cleared = LocationSafety.clearAbove(destination);
+        if (cleared != null)
+            destination = cleared;
+        e.setRespawnLocation(destination);
+
+        // An airborne respawn point gets its landing covered.
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+
+            if (p.isOnline() && !LocationSafety.isSupported(p.getLocation())) {
+
+                fallProtection.grant(p);
+                p.setFallDistance(0.0F);
+
+            }
+
+        });
 
     }
 
@@ -101,7 +136,10 @@ public class SpawnListener implements Listener {
 
         }
 
-        return plugin.getConfig().getLocation("spawns.global.location");
+        // Cloned: the respawn destination is the config's live instance, and it
+        // ends up handed to the respawn event.
+        Location global = plugin.getConfig().getLocation("spawns.global.location");
+        return global == null ? null : global.clone();
 
     }
 

@@ -1,7 +1,9 @@
 package spawnog.commands;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 import net.kyori.adventure.text.Component;
@@ -43,6 +45,9 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
     private final FallProtection fallProtection;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final PendingConfirmations pendingConfirmations = new PendingConfirmations(System::currentTimeMillis);
+    // Returns whose teleport is still resolving: a second confirmation in that
+    // window must not fire a duplicate.
+    private final Set<UUID> inFlight = new HashSet<>();
 
     public SpawnBackCommand(SpawnOG plugin, ReturnLocationStore returnLocationStore,
             LoginMigrationService loginMigrationService, FlightRestorer flightRestorer, FallProtection fallProtection)
@@ -83,6 +88,13 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
         }
 
+        if (inFlight.contains(playerId)) {
+
+            send(player, "locale.returnInFlight", "<red>Your return is already on its way.</red>");
+            return true;
+
+        }
+
         ReturnPoint point = returnLocationStore.get(playerId);
         if (point == null) {
 
@@ -98,7 +110,36 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
         }
 
-        int confirmSeconds = plugin.getConfig().getInt("spawnback.confirm-seconds", DEFAULT_CONFIRM_SECONDS);
+        // A plain return may be built over since the rescue, so it is lifted to
+        // the nearest clear spot above; flight returns keep the exact position
+        // unless it is now inside solid or damaging blocks. Judged before the
+        // confirmation dance: a sealed column refuses outright instead of
+        // consuming a confirmation it would only refuse again.
+        Location recorded = point.location().clone();
+        Location destination = recorded;
+        LocationSafety.Issue recordedIssue = LocationSafety.check(recorded);
+        if (point.mode() == FlightMode.NONE || recordedIssue == LocationSafety.Issue.SUFFOCATION
+                || recordedIssue == LocationSafety.Issue.HAZARD)
+        {
+
+            Location cleared = LocationSafety.clearAbove(recorded);
+            // A fully sealed column has no survivable spot: refuse and keep the
+            // record rather than teleporting the player into solid blocks.
+            if (cleared == null) {
+
+                send(player, "locale.returnBlocked",
+                        "<red>The spot you left is sealed inside solid blocks, so you cannot return there right now.</red>");
+                return true;
+
+            }
+
+            destination = cleared;
+
+        }
+
+        // Clamped: a zero or negative window could never be confirmed at all.
+        int confirmSeconds = Math.max(1,
+                plugin.getConfig().getInt("spawnback.confirm-seconds", DEFAULT_CONFIRM_SECONDS));
         if (!pendingConfirmations.confirm(playerId, point.token(), confirmSeconds * 1000L)) {
 
             send(player, "locale.spawnbackWarning",
@@ -116,29 +157,9 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
         }
 
-        // A plain return may be built over since the rescue, so it is lifted to
-        // the nearest clear spot above; flight returns keep the exact position.
-        Location recorded = point.location().clone();
-        Location destination = recorded;
-        if (point.mode() == FlightMode.NONE) {
-
-            Location cleared = LocationSafety.clearAbove(recorded);
-            // A fully sealed column has no survivable spot: refuse and keep the
-            // record rather than teleporting the player into solid blocks.
-            if (cleared == null) {
-
-                send(player, "locale.returnBlocked",
-                        "<red>The spot you left is sealed inside solid blocks, so you cannot return there right now.</red>");
-                return true;
-
-            }
-
-            destination = cleared;
-
-        }
-
         boolean adjusted = destination.getBlockY() != recorded.getBlockY();
 
+        inFlight.add(playerId);
         // The record is only consumed once the player is actually standing there
         // again, so a failed teleport does not cost them the way back.
         player.teleportAsync(destination).whenComplete((success, error) -> {
@@ -147,6 +168,8 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
                 return;
 
             plugin.getServer().getScheduler().runTask(plugin, () -> {
+
+                inFlight.remove(playerId);
 
                 // Gone mid-teleport: keep the one-shot record and grant nothing,
                 // or the fall immunity cleared on quit would leak to the next join.
@@ -226,6 +249,7 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
     public void onQuit(PlayerQuitEvent event) {
 
         pendingConfirmations.clear(event.getPlayer().getUniqueId());
+        inFlight.remove(event.getPlayer().getUniqueId());
 
     }
 

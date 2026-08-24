@@ -2,6 +2,9 @@ package spawnog.commands;
 
 import java.util.*;
 import javax.management.openmbean.InvalidOpenTypeException;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
+import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Location;
 import org.bukkit.command.*;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -13,9 +16,10 @@ import spawnog.integration.MyWorldsSpawnBridge;
 
 public class SetSpawnCommand implements CommandExecutor, TabCompleter {
 
-    private final FileConfiguration cfg = SpawnOG.getInstance().getConfig();
     private static final Set<String> FLAGS = Set.of("normalize-view", "normalize-position", "unset");
 
+    private final SpawnOG plugin = SpawnOG.getInstance();
+    private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final MyWorldsSpawnBridge myWorldsSpawnBridge;
 
     public SetSpawnCommand(MyWorldsSpawnBridge myWorldsSpawnBridge) {
@@ -33,10 +37,14 @@ public class SetSpawnCommand implements CommandExecutor, TabCompleter {
             return false;
         if (!p.hasPermission(cmd.getPermission())) {
 
-            p.sendMessage(cfg.getString("locale.missingPermission", "You are lacking the required permissions."));
+            send(p, "locale.missingPermission", "<red>You are lacking the required permissions.</red>");
             return true;
 
         }
+
+        // Fetched per command: /reload replaces the instance, and writing
+        // through a cached one would edit a discarded config.
+        FileConfiguration cfg = plugin.getConfig();
 
         String group = null;
         var flags = new HashSet<String>();
@@ -55,8 +63,8 @@ public class SetSpawnCommand implements CommandExecutor, TabCompleter {
         if (flags.contains("unset")) {
 
             cfg.set(path, null);
-            SpawnOG.getInstance().saveConfig();
-            p.sendMessage(cfg.getString("locale.spawnSet", "Spawn location updated."));
+            plugin.saveConfig();
+            send(p, "locale.spawnSet", "<gold>Spawn location updated.</gold>");
             return true;
 
         }
@@ -72,8 +80,8 @@ public class SetSpawnCommand implements CommandExecutor, TabCompleter {
 
         if (flags.contains("normalize-position")) {
 
-            l.setX(l.getX() > l.getBlockX() ? l.getBlockX() + .5 : l.getBlockX() - .5);
-            l.setZ(l.getZ() > l.getBlockZ() ? l.getBlockZ() + .5 : l.getBlockZ() - .5);
+            l.setX(l.getBlockX() + .5);
+            l.setZ(l.getBlockZ() + .5);
             l.setY(l.getBlockY());
 
         }
@@ -85,13 +93,20 @@ public class SetSpawnCommand implements CommandExecutor, TabCompleter {
         l.setPitch((float) round(l.getPitch()));
 
         cfg.set(path, l);
-        SpawnOG.getInstance().saveConfig();
+        plugin.saveConfig();
 
         // Only the global spawn maps onto a world spawn point.
         if (group == null && myWorldsSpawnBridge != null)
             myWorldsSpawnBridge.adopt();
 
-        p.sendMessage(cfg.getString("locale.spawnSet", "Spawn location updated."));
+        send(p, "locale.spawnSet", "<gold>Spawn location updated.</gold>");
+
+        // Warn, not refuse: staff may stage an odd spawn deliberately, but
+        // every rescue lands here, so an unsafe one must be loud.
+        spawnog.login.LocationSafety.Issue issue = spawnog.login.LocationSafety.check(l);
+        if (issue.unsafe())
+            send(p, "locale.spawnUnsafe", "<red>Warning: this spawn looks unsafe because <reason>.</red>",
+                    Placeholder.unparsed("reason", issue.description()));
         return true;
 
     }
@@ -101,6 +116,7 @@ public class SetSpawnCommand implements CommandExecutor, TabCompleter {
             @NotNull String lbl, @NotNull String[] args)
     {
 
+        FileConfiguration cfg = plugin.getConfig();
         var current = Arrays.asList(args);
         var out = new ArrayList<String>();
 
@@ -115,6 +131,13 @@ public class SetSpawnCommand implements CommandExecutor, TabCompleter {
 
         return out.stream().filter(s -> !current.contains(s))
                 .filter(s -> s.startsWith(args[args.length - 1].toLowerCase())).toList();
+
+    }
+
+    private void send(Player player, String path, String fallback, TagResolver... placeholders) {
+
+        String message = plugin.getConfig().getString(path, fallback);
+        player.sendMessage(miniMessage.deserialize(message, placeholders));
 
     }
 

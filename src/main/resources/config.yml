@@ -40,13 +40,21 @@ flight:
     spawn: fly
     warzone: nofly
 spawnback:
-  # Seconds the second /spawnback has to arrive after the warning.
+  # Seconds the second /spawnback has to arrive after the warning. Values below 1 are treated as 1.
   confirm-seconds: 30
 locale:
   # <seconds> is replaced with the teleport warmup length.
   spawnWarmup: "<gold>Teleporting to spawn in <red><seconds> seconds...</red></gold>"
   # Movement cancels the warmup. Taking damage does not.
   spawnCancelled: "<red>Teleport to spawn cancelled because you moved.</red>"
+  # Sent when the spawn world unloaded before the teleport could run.
+  spawnWorldUnloaded: "<red>The spawn world is not loaded, so you cannot be teleported there.</red>"
+  spawnTeleportFailed: "<red>Your teleport to spawn failed.</red>"
+  spawnNotSet: "<red>Server spawn not set.</red>"
+  playerNotFound: "<red>Player not found.</red>"
+  spawnSet: "<gold>Spawn location updated.</gold>"
+  # Sent to staff when a freshly set spawn fails the safety check; <reason> explains why.
+  spawnUnsafe: "<red>Warning: this spawn looks unsafe because <reason>.</red>"
   missingPermission: "<red>You are lacking the required permissions.</red>"
   unsafeLogin: "<gold>You logged in at an unsafe location (<red><x>, <y>, <z></red> in <world>) and were teleported to spawn.</gold>"
   # Sent to a player rescued to spawn because they logged out mid-flight.
@@ -55,7 +63,18 @@ locale:
   flightResumed: "<gold>Welcome back. Your flight was resumed where you left.</gold>"
   autopsyMigration: "<gold>Your OG:SMP autopsy state was safely migrated from <red><x>, <y>, <z></red> in <world>. You were moved to spawn and returned to survival.</gold>"
   gamemodeNormalized: "<gold>Your login gamemode was safely returned to survival.</gold>"
-  loginSafetyFailed: "<red>Your login safety migration could not finish safely. Please contact staff.</red>"
+  # Sent when a login gamemode is refused where the player logged in but permitted at spawn, so they are pulled there and keep it.
+  gamemodeRelocated: "<gold>You logged in using <red><gamemode></red> where it is not permitted, so you were brought to spawn, where it is.</gold>"
+  # The /fly toggle's four player-facing messages.
+  flightEnabled: "<green>Flight enabled.</green>"
+  flightDisabled: "<yellow>Flight disabled.</yellow>"
+  flightGamemodeGoverned: "<red>Your gamemode already governs flight; /fly is for survival.</red>"
+  flightRegionRefused: "<red>Flight can only be toggled inside a region that allows flight.</red>"
+  # Four distinct failures, so players and staff can tell them apart.
+  loginSafetyNoSpawn: "<red>Your login location could not be made safe because the global spawn is not configured. Staff have been notified.</red>"
+  loginSafetyTeleportFailed: "<red>Your login safety migration could not finish. You were protected in place; please contact staff.</red>"
+  loginSafetyGamemodeBlocked: "<red>Another plugin prevented your safe switch to survival. Staff have been notified.</red>"
+  autopsyRecordFailed: "<red>Your autopsy migration could not be recorded. Please contact staff.</red>"
   returnAvailable: "<gold>Run <click:run_command:'/spawnback'><hover:show_text:'<gold>Click to run <red>/spawnback</red></gold>'><red>/spawnback</red></hover></click> if you want to go back there anyway.</gold>"
   # Sent when the return record could not be written after a rescue.
   returnRecordFailed: "<red>Your way back could not be saved. Staff have been notified.</red>"
@@ -72,6 +91,8 @@ locale:
   returnNone: "<red>You have no location to return to.</red>"
   returnWorldMissing: "<red>The world you were in (<world>) is not loaded, so you cannot return there.</red>"
   returnBusy: "<red>Your login is still being made safe. Try again in a few seconds.</red>"
+  # Sent when a second confirmed /spawnback arrives while the first teleport is still resolving.
+  returnInFlight: "<red>Your return is already on its way.</red>"
   returnFailed: "<red>Your return teleport failed.</red>"
   # Sent when the recorded gamemode is refused at the return point, so the player stays in survival.
   returnGamemodeDenied: "<gold>You don't have the authority to be in <red><gamemode></red> here, so you stay in survival.</gold>"

@@ -1,14 +1,18 @@
 package spawnog.flight;
 
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import org.bukkit.GameMode;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
+import spawnog.SpawnOG;
+
 public final class ToggleRegionFlightCommand implements CommandExecutor {
 
+    private final SpawnOG plugin = SpawnOG.getInstance();
     private final RegionFlightService flightService;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
 
@@ -34,16 +38,33 @@ public final class ToggleRegionFlightCommand implements CommandExecutor {
 
         if (!flightService.canToggleFlight(player)) {
 
-            player.sendMessage(miniMessage
-                    .deserialize("<red>Flight can only be toggled inside a region that allows flight.</red>"));
+            // Three distinct refusals; telling a creative player "wrong
+            // region" sends them hunting for a problem they don't have.
+            if (player.getGameMode() == GameMode.CREATIVE || player.getGameMode() == GameMode.SPECTATOR)
+                send(player, "locale.flightGamemodeGoverned",
+                        "<red>Your gamemode already governs flight; /fly is for survival.</red>");
+            else if (!flightService.hasFlightPermission(player))
+                send(player, "locale.missingPermission", "<red>You are lacking the required permissions.</red>");
+            else
+                send(player, "locale.flightRegionRefused",
+                        "<red>Flight can only be toggled inside a region that allows flight.</red>");
             return true;
 
         }
 
         boolean enabled = flightService.toggleFlight(player);
-        player.sendMessage(miniMessage
-                .deserialize(enabled ? "<green>Flight enabled.</green>" : "<yellow>Flight disabled.</yellow>"));
+        if (enabled)
+            send(player, "locale.flightEnabled", "<green>Flight enabled.</green>");
+        else
+            send(player, "locale.flightDisabled", "<yellow>Flight disabled.</yellow>");
         return true;
+
+    }
+
+    private void send(Player player, String path, String fallback) {
+
+        String message = plugin.getConfig().getString(path, fallback);
+        player.sendMessage(miniMessage.deserialize(message));
 
     }
 

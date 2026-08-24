@@ -20,6 +20,7 @@ import spawnog.login.GameModeInventoriesAuthority;
 import spawnog.login.GamemodeAuthority;
 import spawnog.login.GamemodePolicy;
 import spawnog.login.LoginMigrationService;
+import spawnog.login.LoginShield;
 import spawnog.login.NoClipAuthority;
 import spawnog.login.ReturnLocationStore;
 import spawnog.listener.SpawnListener;
@@ -43,6 +44,7 @@ public final class SpawnOG extends JavaPlugin {
     private RegionFlightService regionFlightService;
     private SpawnWarmupService spawnWarmupService;
     private FallProtection fallProtection;
+    private LoginShield loginShield;
     private ManagedWorlds managedWorlds;
     private FlightQuitListener flightQuitListener;
 
@@ -56,13 +58,18 @@ public final class SpawnOG extends JavaPlugin {
         if (rsp != null)
             luckPerms = rsp.getProvider();
 
-        spawnWarmupService = new SpawnWarmupService(this);
-        getServer().getPluginManager().registerEvents(spawnWarmupService, this);
-
         // Registered unconditionally: a /spawnback return has to cushion the
         // landing even on a server with no WorldGuard and no regional flight.
         fallProtection = new FallProtection();
         getServer().getPluginManager().registerEvents(fallProtection, this);
+
+        // Plugin-owned damage shield: rescues never touch the persisted
+        // invulnerable flag, so a crash cannot bake it into playerdata.
+        loginShield = new LoginShield();
+        getServer().getPluginManager().registerEvents(loginShield, this);
+
+        spawnWarmupService = new SpawnWarmupService(this, fallProtection);
+        getServer().getPluginManager().registerEvents(spawnWarmupService, this);
 
         myWorldsSpawnBridge = new MyWorldsSpawnBridge(this);
         getServer().getPluginManager().registerEvents(myWorldsSpawnBridge, this);
@@ -88,9 +95,9 @@ public final class SpawnOG extends JavaPlugin {
         GamemodeAuthority gamemodeAuthority = GameModeInventoriesAuthority.find(this);
         GamemodePolicy gamemodePolicy = new GamemodePolicy(this, regionLookup(), gamemodeAuthority);
         loginMigrationService = new LoginMigrationService(this, migrationStore, returnLocationStore,
-                flightSnapshotStore, gamemodePolicy, managedWorlds, fallProtection);
-        getServer().getPluginManager().registerEvents(new SpawnListener(this, loginMigrationService, managedWorlds),
-                this);
+                flightSnapshotStore, gamemodePolicy, gamemodeAuthority, managedWorlds, fallProtection, loginShield);
+        getServer().getPluginManager()
+                .registerEvents(new SpawnListener(this, loginMigrationService, managedWorlds, fallProtection), this);
 
         if (getConfig().getBoolean("flight.enabled", true)
                 && getServer().getPluginManager().isPluginEnabled("WorldGuard")
@@ -100,7 +107,11 @@ public final class SpawnOG extends JavaPlugin {
             regionFlightService = new RegionFlightService(this, loginMigrationService, flightIntentStore,
                     fallProtection);
             getServer().getPluginManager().registerEvents(regionFlightService, this);
-            getCommand("fly").setExecutor(new ToggleRegionFlightCommand(regionFlightService));
+            var flyCommand = getCommand("fly");
+            if (flyCommand != null)
+                flyCommand.setExecutor(new ToggleRegionFlightCommand(regionFlightService));
+            else
+                getLogger().severe("Command 'fly' missing from plugin.yml; the /fly toggle is unavailable.");
 
         } else if (getConfig().getBoolean("flight.enabled", true)) {
 
@@ -110,8 +121,15 @@ public final class SpawnOG extends JavaPlugin {
 
         // Captures the flight snapshot at LOWEST, before the flight service's
         // NORMAL quit handler grounds the player.
-        flightQuitListener = new FlightQuitListener(this, flightSnapshotStore, flightIntentStore, noClipAuthority);
+        flightQuitListener = new FlightQuitListener(this, flightSnapshotStore, flightIntentStore, loginMigrationService,
+                noClipAuthority);
         getServer().getPluginManager().registerEvents(flightQuitListener, this);
+
+        // Every rescue lands at the global spawn; an unsafe one fails them all.
+        var globalSpawn = getConfig().getLocation("spawns.global.location");
+        if (globalSpawn != null && globalSpawn.isWorldLoaded() && spawnog.login.LocationSafety.isUnsafe(globalSpawn))
+            getLogger().severe("spawns.global.location is unsafe: "
+                    + spawnog.login.LocationSafety.check(globalSpawn).description() + ".");
 
         // One decision table for handing flight back, shared by the login
         // bypass path and /spawnback so warning and outcome cannot disagree.
@@ -141,6 +159,8 @@ public final class SpawnOG extends JavaPlugin {
             regionFlightService.close();
         if (fallProtection != null)
             fallProtection.close();
+        if (loginShield != null)
+            loginShield.close();
         if (managedWorlds != null)
             managedWorlds.close();
 

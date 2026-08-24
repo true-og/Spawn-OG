@@ -1,11 +1,13 @@
 package spawnog.login;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.configuration.ConfigurationSection;
 
 import spawnog.SpawnOG;
 import spawnog.flight.FlightMode;
@@ -143,6 +145,30 @@ public final class ReturnLocationStore extends YamlStore {
 
         data.set(path(playerId), null);
         save("cleared return location");
+
+    }
+
+    // The raw stored record, so a caller about to overwrite it can put it back
+    // if the rescue that justified the overwrite never happens. Null when empty.
+    public Map<String, Object> snapshotRaw(UUID playerId) {
+
+        ConfigurationSection section = data.getConfigurationSection(path(playerId));
+        return section == null ? null : section.getValues(true);
+
+    }
+
+    // Puts back a record captured by snapshotRaw; null clears the slot.
+    public void restoreRaw(UUID playerId, Map<String, Object> snapshot) {
+
+        data.set(path(playerId), null);
+        if (snapshot != null)
+            snapshot.forEach((key, value) -> {
+
+                if (!(value instanceof ConfigurationSection))
+                    data.set(path(playerId) + "." + key, value);
+
+            });
+        save("restored return location");
 
     }
 

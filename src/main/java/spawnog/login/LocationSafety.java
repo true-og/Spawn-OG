@@ -95,6 +95,10 @@ public final class LocationSafety {
         int z = location.getBlockZ();
         int startY = Math.max(location.getBlockY(), world.getMinHeight());
 
+        // Above the build limit nothing can occlude: the spot is already clear.
+        if (startY >= world.getMaxHeight() - 1)
+            return location.clone();
+
         for (int y = startY; y < world.getMaxHeight() - 1; y++) {
 
             Block feet = world.getBlockAt(x, y, z);
@@ -137,7 +141,9 @@ public final class LocationSafety {
 
                 if (SURFACE_HAZARDS.contains(type))
                     return Issue.HAZARD;
-                return drop <= MAX_SAFE_FALL_BLOCKS ? Issue.NONE : Issue.LONG_FALL;
+                // The walk starts at the feet block, so drop counts one more
+                // than the actual fall.
+                return drop - 1 <= MAX_SAFE_FALL_BLOCKS ? Issue.NONE : Issue.LONG_FALL;
 
             }
 

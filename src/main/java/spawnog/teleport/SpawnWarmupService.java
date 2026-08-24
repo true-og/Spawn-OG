@@ -11,13 +11,17 @@ import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.scheduler.BukkitTask;
 
 import spawnog.SpawnOG;
+import spawnog.login.LocationSafety;
 
 // Owns the countdown between /spawn and its teleport. Leaving the starting
 // block cancels it; damage does not, so a player under attack still gets pulled.
@@ -28,12 +32,14 @@ public final class SpawnWarmupService implements Listener {
     private static final long WARMUP_TICKS = 20L * WARMUP_SECONDS;
 
     private final SpawnOG plugin;
+    private final FallProtection fallProtection;
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
     private final Map<UUID, PendingTeleport> pendingTeleports = new HashMap<>();
 
-    public SpawnWarmupService(SpawnOG plugin) {
+    public SpawnWarmupService(SpawnOG plugin, FallProtection fallProtection) {
 
         this.plugin = plugin;
+        this.fallProtection = fallProtection;
 
     }
 
@@ -52,12 +58,70 @@ public final class SpawnWarmupService implements Listener {
             // Drop the pending entry first: PlayerTeleportEvent extends
             // PlayerMoveEvent, so the teleport would otherwise cancel itself.
             pendingTeleports.remove(playerId);
-            if (player.isOnline())
-                player.teleportAsync(destination);
+            teleport(player, destination);
 
         }, WARMUP_TICKS);
 
-        pendingTeleports.put(playerId, new PendingTeleport(task, player.getLocation().clone()));
+        // For a rider the move events carry the vehicle's position, so the
+        // origin must be the vehicle's too or the first nudge false-cancels.
+        Location origin = player.isInsideVehicle() && player.getVehicle() != null
+                ? player.getVehicle().getLocation().clone()
+                : player.getLocation().clone();
+        pendingTeleports.put(playerId, new PendingTeleport(task, origin));
+
+    }
+
+    // An admin-initiated pull skips the countdown: the target's ordinary
+    // walking would otherwise cancel a teleport they never asked for.
+    public void teleportNow(Player player, Location destination) {
+
+        cancelSilently(player);
+        teleport(player, destination);
+
+    }
+
+    private void teleport(Player player, Location destination) {
+
+        if (!player.isOnline())
+            return;
+        // The destination world can unload during the countdown; teleporting
+        // into it would throw and strand the player with no message.
+        if (!destination.isWorldLoaded()) {
+
+            send(player, "locale.spawnWorldUnloaded",
+                    "<red>The spawn world is not loaded, so you cannot be teleported there.</red>");
+            return;
+
+        }
+
+        player.teleportAsync(destination).whenComplete((success, error) -> {
+
+            if (!plugin.isEnabled())
+                return;
+
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+
+                if (!player.isOnline())
+                    return;
+
+                if (!Boolean.TRUE.equals(success) || error != null) {
+
+                    send(player, "locale.spawnTeleportFailed", "<red>Your teleport to spawn failed.</red>");
+                    return;
+
+                }
+
+                // A spawn set in the air still gets a covered landing.
+                if (!LocationSafety.isSupported(player.getLocation())) {
+
+                    fallProtection.grant(player);
+                    player.setFallDistance(0.0F);
+
+                }
+
+            });
+
+        });
 
     }
 
@@ -82,7 +146,8 @@ public final class SpawnWarmupService implements Listener {
 
     }
 
-    @EventHandler
+    // ignoreCancelled: a move another plugin bounced back never happened.
+    @EventHandler(ignoreCancelled = true)
     public void onMove(PlayerMoveEvent event) {
 
         if (pendingTeleports.isEmpty() || event.getTo() == null)
@@ -110,6 +175,24 @@ public final class SpawnWarmupService implements Listener {
     public void onKick(PlayerKickEvent event) {
 
         cancelSilently(event.getPlayer());
+
+    }
+
+    // Any other teleport (a /spawnback return, a portal) supersedes the
+    // warmup; without this it would rip the player back seconds later.
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleport(PlayerTeleportEvent event) {
+
+        cancelSilently(event.getPlayer());
+
+    }
+
+    // A respawn relocates without firing a move event; the countdown must not
+    // survive the death and yank the fresh spawn.
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onDeath(PlayerDeathEvent event) {
+
+        cancelSilently(event.getEntity());
 
     }
 
