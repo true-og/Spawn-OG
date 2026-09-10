@@ -33,6 +33,7 @@ public final class LoginMigrationService {
 
     private static final String AUTOPSY_REASON = "you were left in spectator mode by the OG:SMP autopsy";
     private static final String AIRBORNE_REASON = "you logged out mid-flight";
+    private static final String NOCLIP_REASON = "you logged out with NoClip enabled";
     private static final String GAMEMODE_REASON = "your login gamemode is not permitted there";
     private static final int DEFAULT_GRACE_SECONDS = 30;
     // Logins restore the exact quit position; this slack only absorbs
@@ -105,7 +106,7 @@ public final class LoginMigrationService {
 
             } else
 
-                return handleAirborneLogin(player, plannedDestination, snapshot);
+                return handleRecordedLogin(player, plannedDestination, snapshot);
 
         }
 
@@ -113,15 +114,15 @@ public final class LoginMigrationService {
 
     }
 
-    // A relog in flight: resumed on the spot when still permitted there and the
-    // bypass is held, otherwise a pull to spawn with /spawnback as the way back.
-    private boolean handleAirborneLogin(Player player, Location plannedDestination, FlightSnapshot snapshot) {
+    // Restore from the mode's own permissions and location rules. A configured
+    // join destination still takes precedence; restoration then happens there.
+    private boolean handleRecordedLogin(Player player, Location plannedDestination, FlightSnapshot snapshot) {
 
         FlightMode mode = snapshot.mode();
 
-        if (player.hasPermission(BYPASS_PERMISSION) && flightRestorer != null
+        if (plannedDestination == null && flightRestorer != null
                 && flightRestorer.canResumeInPlace(mode, player, player.getLocation())
-                && flightRestorer.resumeInPlace(mode, player))
+                && flightRestorer.resumeInPlace(mode, player, snapshot.flying()))
         {
 
             player.setFallDistance(0.0F);
@@ -134,7 +135,7 @@ public final class LoginMigrationService {
 
                 if (player.getAllowFlight()) {
 
-                    if (!player.isFlying() && !LocationSafety.isSupported(player.getLocation()))
+                    if (snapshot.flying() && !player.isFlying() && !LocationSafety.isSupported(player.getLocation()))
                         player.setFlying(true);
                     // Spent only once the resume has actually held for a tick.
                     flightSnapshotStore.clear(player.getUniqueId());
@@ -149,7 +150,11 @@ public final class LoginMigrationService {
                 }
 
             });
-            send(player, "locale.flightResumed", "<gold>Welcome back. Your flight was resumed where you left.</gold>");
+            if (mode == FlightMode.NOCLIP)
+                send(player, "locale.noclipResumed", "<gold>Welcome back. Your NoClip mode was restored.</gold>");
+            else
+                send(player, "locale.flightResumed",
+                        "<gold>Welcome back. Your flight was resumed where you left.</gold>");
             return true;
 
         }
@@ -160,7 +165,9 @@ public final class LoginMigrationService {
         // over water would evade gamemode normalization entirely.
         GameMode liveGamemode = player.getGameMode();
         boolean gamemodeFlyer = liveGamemode == GameMode.CREATIVE || liveGamemode == GameMode.SPECTATOR;
-        if (plannedDestination == null && (keepsGamemodeFlight(player)
+        // If NoClip could not resume, retain its toggle through the rescue and
+        // return record instead of discarding it just because the player can land.
+        if (mode != FlightMode.NOCLIP && plannedDestination == null && (keepsGamemodeFlight(player)
                 || !gamemodeFlyer && !LocationSafety.check(player.getLocation()).unsafe()))
         {
 
@@ -186,7 +193,9 @@ public final class LoginMigrationService {
 
         // Corroboration pinned the snapshot to this login: the recorded spot and
         // gamemode are the ones the player carries right now.
-        GameMode originalGamemode = snapshot.gamemode();
+        // Spectator during /nc is an implementation detail, not independent
+        // spectator authority. The underlying /gmic creative policy still applies.
+        GameMode originalGamemode = mode == FlightMode.NOCLIP ? GameMode.CREATIVE : snapshot.gamemode();
         Location origin = snapshot.location().clone();
         // Judged at the rescue destination, same as a grounded login: a creative
         // flyer rescued into the spawn creative region keeps creative.
@@ -435,17 +444,24 @@ public final class LoginMigrationService {
 
         }
 
-        // Force-gamemode demotes non-survival quitters before login, so skipping
-        // normalization is not enough: the gamemode must be actively handed back.
-        promoteGamemode(player, pending);
+        // A configured join teleport or rescue can land where the saved mode
+        // is allowed. Re-check there and restore through its own authority.
+        final boolean restoredMode = pending.snapshot() != null && flightRestorer != null
+                && flightRestorer.restore(pending.snapshot().mode(), player, pending.originalFlying());
+        // Force-gamemode can demote quitters before login. If the full mode is
+        // unavailable, the underlying gamemode may still be permitted here.
+        if (!restoredMode)
+            promoteGamemode(player, pending);
 
         if (pending.snapshot() != null) {
 
             // A rescued flyer may be dropped a few blocks at spawn; cover it.
             fallProtection.grant(player);
             Location from = pending.originalLocation();
-            send(player, "locale.flyingRescue",
-                    "<gold>You logged out mid-flight at <red><x>, <y>, <z></red> in <world> and were brought to spawn.</gold>",
+            final boolean noclip = pending.snapshot().noclip();
+            send(player, noclip ? "locale.noclipRescue" : "locale.flyingRescue", noclip
+                    ? "<gold>You logged out with NoClip enabled at <red><x>, <y>, <z></red> in <world> and were brought to spawn.</gold>"
+                    : "<gold>You logged out mid-flight at <red><x>, <y>, <z></red> in <world> and were brought to spawn.</gold>",
                     Placeholder.unparsed("x", String.valueOf(from.getBlockX())),
                     Placeholder.unparsed("y", String.valueOf(from.getBlockY())),
                     Placeholder.unparsed("z", String.valueOf(from.getBlockZ())),
@@ -550,7 +566,7 @@ public final class LoginMigrationService {
 
         String reason;
         if (pending.snapshot() != null)
-            reason = AIRBORNE_REASON;
+            reason = pending.snapshot().noclip() ? NOCLIP_REASON : AIRBORNE_REASON;
         else if (pending.autopsyMigration())
             reason = AUTOPSY_REASON;
         else if (pending.gamemodeRelocation())
@@ -663,8 +679,8 @@ public final class LoginMigrationService {
 
     }
 
-    // Same spot and still off the ground, or stale. Gamemode equality is NOT
-    // required (force-gamemode), nor live flight bits (/fly is revoked on quit).
+    // Require the same spot and either flight evidence or a saved NoClip toggle.
+    // Force-gamemode can change the mode; /fly revocation can change abilities.
     private boolean corroborates(Player player, FlightSnapshot snapshot) {
 
         Location recorded = snapshot.location();
@@ -676,7 +692,8 @@ public final class LoginMigrationService {
         if (snapshot.gamemode() == null)
             return false;
 
-        return player.isFlying() || player.getAllowFlight() || !LocationSafety.isSupported(current);
+        return snapshot.noclip() || player.isFlying() || player.getAllowFlight()
+                || !LocationSafety.isSupported(current);
 
     }
 
@@ -709,7 +726,7 @@ public final class LoginMigrationService {
     {
     }
 
-    // snapshot is non-null only for an airborne rescue, and then carries the
+    // snapshot is non-null for an airborne or NoClip rescue, and carries the
     // state the quit captured; the original* fields describe the same moment.
     private record PendingLogin(boolean originalAllowFlight, boolean originalFlying, GameMode originalGamemode,
             Location originalLocation, boolean normalizeGamemode, boolean autopsyMigration, boolean gamemodeRelocation,

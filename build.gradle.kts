@@ -52,7 +52,15 @@ dependencies {
         project(":libs:GameModeInventories-OG")
     ) // Import GameModeInventories-OG gamemode policy (from source).
     compileOnlyApi(project(":libs:NoClip-OG")) // Import NoClip-OG gamemode policy (from source).
+    testImplementation("org.purpurmc.purpur:purpur-api:1.19.4-R0.1-SNAPSHOT")
+    testImplementation(project(":libs:NoClip-OG"))
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testImplementation("org.mockito:mockito-core:5.14.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.2")
+    testRuntimeOnly("net.luckperms:api:5.4")
 }
+
+tasks.test { useJUnitPlatform() }
 
 // ---------------------- Reproducible jars ----------------------------
 tasks.withType<AbstractArchiveTask>().configureEach { // Ensure reproducible .jars

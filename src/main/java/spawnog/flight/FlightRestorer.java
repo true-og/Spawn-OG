@@ -60,14 +60,20 @@ public final class FlightRestorer {
     // Rights re-checked live; false means the caller owes fall protection.
     public boolean restore(FlightMode mode, Player player) {
 
+        return restore(mode, player, true);
+
+    }
+
+    public boolean restore(FlightMode mode, Player player, boolean flying) {
+
         if (player == null || !canRestore(mode, player, player.getLocation()))
             return false;
 
         return switch (mode) {
 
             case FLY -> regionFlightService.grantRegionFlight(player);
-            case GMIC -> restoreCreative(player);
-            case NOCLIP -> restoreCreative(player) && noClipAuthority.enterNoClip(player);
+            case GMIC -> restoreCreative(player, flying);
+            case NOCLIP -> restoreCreative(player, flying) && noClipAuthority.enterNoClip(player);
             case SPECTATOR, NONE -> false;
 
         };
@@ -88,10 +94,16 @@ public final class FlightRestorer {
 
     public boolean resumeInPlace(FlightMode mode, Player player) {
 
+        return resumeInPlace(mode, player, true);
+
+    }
+
+    public boolean resumeInPlace(FlightMode mode, Player player, boolean flying) {
+
         if (mode == FlightMode.SPECTATOR)
             return true;
 
-        return restore(mode, player);
+        return restore(mode, player, flying);
 
     }
 
@@ -149,13 +161,13 @@ public final class FlightRestorer {
 
     // Creative through the authority so the inventory swap runs. Abilities are
     // re-asserted, not trusted; setFlying throws while allow-flight is off.
-    private boolean restoreCreative(Player player) {
+    private boolean restoreCreative(Player player, boolean flying) {
 
         if (!gamemodeAuthority.changeGameMode(player, GameMode.CREATIVE))
             return false;
 
         player.setAllowFlight(true);
-        player.setFlying(true);
+        player.setFlying(flying);
         return true;
 
     }

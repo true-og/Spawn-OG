@@ -11,8 +11,8 @@ import org.bukkit.entity.Player;
 import spawnog.SpawnOG;
 import spawnog.login.YamlStore;
 
-// Persistent record of who left mid-flight: where, gamemode, and kind of
-// flight. Last quit wins: a grounded quit erases any stale airborne record.
+// Persistent record of who left mid-flight or with NoClip enabled: where,
+// gamemode, and kind of flight. Grounded NoClip retains flying=false.
 public final class FlightSnapshotStore extends YamlStore {
 
     public FlightSnapshotStore(SpawnOG plugin) {

@@ -110,6 +110,10 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
         }
 
+        // A NoClip spectator phase still needs /gmic authority. Apply the same
+        // interpretation to old records in both the warning and the return.
+        final GameMode returnGamemode = point.mode() == FlightMode.NOCLIP ? GameMode.CREATIVE : point.gamemode();
+
         // A plain return may be built over since the rescue, so it is lifted to
         // the nearest clear spot above; flight returns keep the exact position
         // unless it is now inside solid or damaging blocks. Judged before the
@@ -150,7 +154,7 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
             // back at the return point; a sanctioned live spectator cannot fall.
             if (point.mode() != FlightMode.NONE
                     && !flightRestorer.canResumeInPlace(point.mode(), player, point.location())
-                    && !flightRestorer.canPromoteGamemode(player, point.gamemode(), point.location()))
+                    && !flightRestorer.canPromoteGamemode(player, returnGamemode, point.location()))
                 send(player, "locale.spawnbackFallWarning",
                         "<gold>You can no longer fly there, so you will fall; a one-time fall protection will cover the landing.</gold>");
             return true;
@@ -186,11 +190,11 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
                 // Re-checked live at the destination: a right lost since the
                 // warning means protection; a sanctioned spectator is left as is.
                 boolean restored = flightRestorer.canResumeInPlace(point.mode(), player, player.getLocation())
-                        && flightRestorer.resumeInPlace(point.mode(), player);
+                        && flightRestorer.resumeInPlace(point.mode(), player, point.flying());
 
                 // Flight could not come back, but the recorded gamemode still
                 // might: a standing creative or spectator is promoted where allowed.
-                GameMode gamemode = point.gamemode();
+                GameMode gamemode = returnGamemode;
                 boolean wantsGamemode = gamemode == GameMode.CREATIVE || gamemode == GameMode.SPECTATOR;
                 if (!restored && wantsGamemode && flightRestorer.promoteGamemode(player, gamemode)) {
 

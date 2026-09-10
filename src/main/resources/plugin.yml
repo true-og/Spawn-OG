@@ -38,7 +38,7 @@ permissions:
     description: Use /spawnback to return to a location a login safety migration moved you from
     default: true
   spawnog.login-migration.bypass:
-    description: Resume flight in place on relog when still permitted there; exempt from autopsy migration
+    description: Exempt from the one-time autopsy login migration
     default: false
   spawnog.flight:
     description: Use /fly inside regions configured to allow flight

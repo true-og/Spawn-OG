@@ -132,7 +132,7 @@ public final class SpawnOG extends JavaPlugin {
                     + spawnog.login.LocationSafety.check(globalSpawn).description() + ".");
 
         // One decision table for handing flight back, shared by the login
-        // bypass path and /spawnback so warning and outcome cannot disagree.
+        // restore path and /spawnback so warning and outcome cannot disagree.
         FlightRestorer flightRestorer = new FlightRestorer(regionFlightService, gamemodePolicy, gamemodeAuthority,
                 noClipAuthority);
         loginMigrationService.setFlightRestorer(flightRestorer);

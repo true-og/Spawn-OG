@@ -38,7 +38,14 @@ public final class NoClipAuthority {
 
     }
 
-    // Re-engages /nc for a player already in creative or spectator. NoClip-OG
+    public boolean hasNoClipIntent(Player player) {
+
+        final NoClip noClip = running();
+        return noClip != null && noClip.getManager().hasNoClipIntent(player);
+
+    }
+
+    // Re-engages /nc for a player already in creative. NoClip-OG
     // checks the gamemode and the permission itself.
     public boolean enterNoClip(Player player) {
 

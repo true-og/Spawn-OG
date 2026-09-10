@@ -32,8 +32,10 @@ login-safety:
   # list is what counts.
   creative-regions:
     - spawn
-  # Holders of spawnog.login-migration.bypass resume flight in place on relog when
-  # still permitted to fly there, and are exempt from autopsy migration.
+  # spawnog.login-migration.bypass exempts players from autopsy migration only.
+  # Saved /gmic, /nc (including grounded toggles), and /fly are restored according
+  # to their own permissions and location rules, independently of that bypass.
+  # A configured join teleport is honored; modes are re-checked at the destination.
 flight:
   enabled: true
   regions:
@@ -59,8 +61,10 @@ locale:
   unsafeLogin: "<gold>You logged in at an unsafe location (<red><x>, <y>, <z></red> in <world>) and were teleported to spawn.</gold>"
   # Sent to a player rescued to spawn because they logged out mid-flight.
   flyingRescue: "<gold>You logged out mid-flight at <red><x>, <y>, <z></red> in <world> and were brought to spawn.</gold>"
-  # Sent when a bypass holder's flight is resumed in place instead of a rescue.
+  # Sent when permitted flight is resumed in place instead of a rescue.
   flightResumed: "<gold>Welcome back. Your flight was resumed where you left.</gold>"
+  noclipResumed: "<gold>Welcome back. Your NoClip mode was restored.</gold>"
+  noclipRescue: "<gold>You logged out with NoClip enabled at <red><x>, <y>, <z></red> in <world> and were brought to spawn.</gold>"
   autopsyMigration: "<gold>Your OG:SMP autopsy state was safely migrated from <red><x>, <y>, <z></red> in <world>. You were moved to spawn and returned to survival.</gold>"
   gamemodeNormalized: "<gold>Your login gamemode was safely returned to survival.</gold>"
   # Sent when a login gamemode is refused where the player logged in but permitted at spawn, so they are pulled there and keep it.

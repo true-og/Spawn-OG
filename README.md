@@ -13,6 +13,8 @@ Safe player entry, spawn management, and WorldGuard regional flight for [TrueOG 
 - **Regional Flight:** `/fly` inside WorldGuard regions marked `fly`; higher priority wins, ties are deny-first. The toggle survives restarts, and plugin-granted flight survives reloads without escaping tracking.
 - **Compatibility:** LuckPerms, WorldEdit, WorldGuard, GameModeInventories-OG, NoClip-OG, MyWorlds, Essentials-OG.
 
+NoClip sessions are recorded even while grounded. In managed worlds with login safety enabled, saved `/gmic`, `/nc`, and `/fly` modes are restored according to their own permissions and location rules. NoClip requires GameModeInventories-OG to permit creative and the player to have `noclip.use`; `/fly` requires flight permission and an allowed flight region. Configured join teleports are honored, and restoration checks the final destination. `/spawnback` applies the same rules. NoClip's temporary spectator phase uses creative's rules, and restoration preserves whether the player was flying. Install the updated NoClip-OG alongside Spawn-OG for the persistent-toggle API.
+
 ## Commands
 
 | Command | Description | Permission |
@@ -26,7 +28,7 @@ Safe player entry, spawn management, and WorldGuard regional flight for [TrueOG 
 
 - `spawnog.spawn` (default: true), `spawnog.spawn.others`, `spawnog.setspawn`
 - `spawnog.spawnback` (default: true)
-- `spawnog.login-migration.bypass` - Resume flight in place on relog; exempt from autopsy migration
+- `spawnog.login-migration.bypass` - Exempt from the one-time autopsy migration; independent of mode and flight restoration
 - `spawnog.flight` (default: true), `spawnog.flight.bypass`, `spawnog.flight.*`
 - *(Legacy aliases: `wgamemode.fly`, `wgamemode.fly.bypass`, `wgamemode.*`)*
 
