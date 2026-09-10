@@ -666,6 +666,23 @@ public final class RegionFlightService implements Listener {
 
     }
 
+    // Whether /fly is switched on for this player, live ability aside: a quit
+    // or a rescue reads it to record which kind of flight they were holding.
+    public boolean hasFlightIntent(Player player) {
+
+        return player != null && flightIntentStore.contains(player.getUniqueId());
+
+    }
+
+    // Re-arms the /fly toggle a restore just honored, so flight comes back on
+    // the next flight region even when this spot could not grant it.
+    public void rememberFlightIntent(Player player) {
+
+        if (player != null && hasFlightPermission(player))
+            flightIntentStore.record(player);
+
+    }
+
     private void revokeLandingGrant(Player player, org.bukkit.Location at) {
 
         if (!landingGrants.remove(player.getUniqueId()))

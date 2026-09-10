@@ -203,6 +203,18 @@ class FlightLoginTest {
     }
 
     @Test
+    void groundedFlightToggleIsRecordedForTheReturn() {
+
+        when(snapshots.peek(player.getUniqueId())).thenReturn(null);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+        when(restorer.liveMode(player, GameMode.SURVIVAL)).thenReturn(FlightMode.FLY);
+        assertTrue(service.handleLogin(player, null));
+        verify(returns).record(player.getUniqueId(), "Builder", origin, "it is a lethal drop above the ground",
+                GameMode.SURVIVAL, false, false, FlightMode.FLY);
+
+    }
+
+    @Test
     void spectatorPhaseIsRecordedAsCreativeForReturnPolicy() {
 
         when(player.getGameMode()).thenReturn(GameMode.SPECTATOR);

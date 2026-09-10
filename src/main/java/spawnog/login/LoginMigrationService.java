@@ -574,7 +574,15 @@ public final class LoginMigrationService {
         else
             reason = pending.safetyIssue().description();
 
-        FlightMode mode = pending.snapshot() == null ? FlightMode.NONE : pending.snapshot().mode();
+        // Without an airborne snapshot the toggles the player still holds are
+        // the record: a grounded /fly or NoClip is state /spawnback must return.
+        FlightMode mode;
+        if (pending.snapshot() != null)
+            mode = pending.snapshot().mode();
+        else
+            mode = flightRestorer == null ? FlightMode.NONE
+                    : flightRestorer.liveMode(player, pending.originalGamemode());
+
         return returnLocationStore.record(player.getUniqueId(), player.getName(), pending.originalLocation(), reason,
                 pending.originalGamemode(), pending.originalAllowFlight(), pending.originalFlying(), mode);
 

@@ -114,6 +114,15 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
         // interpretation to old records in both the warning and the return.
         final GameMode returnGamemode = point.mode() == FlightMode.NOCLIP ? GameMode.CREATIVE : point.gamemode();
 
+        // What the record proves they held where they left, whatever they have
+        // toggled since: the return answers to the record, not to live state.
+        final boolean heldFlight = point.mode() != FlightMode.NONE || point.allowFlight() || point.flying();
+        // Survival flight is theirs to switch on again, so a lapsed toggle may be
+        // lent back. Creative and spectator answer to policy, which already spoke.
+        final boolean heldRegionalFlight = (point.mode() == FlightMode.FLY
+                || point.mode() == FlightMode.NONE && point.allowFlight()) && returnGamemode != GameMode.CREATIVE
+                && returnGamemode != GameMode.SPECTATOR;
+
         // A plain return may be built over since the rescue, so it is lifted to
         // the nearest clear spot above; flight returns keep the exact position
         // unless it is now inside solid or damaging blocks. Judged before the
@@ -152,11 +161,19 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
                     Placeholder.unparsed("seconds", String.valueOf(confirmSeconds)));
             // A flyer is warned of the drop unless flight or their gamemode comes
             // back at the return point; a sanctioned live spectator cannot fall.
-            if (point.mode() != FlightMode.NONE
-                    && !flightRestorer.canResumeInPlace(point.mode(), player, point.location())
+            if (heldFlight && !flightRestorer.canResumeInPlace(point.mode(), player, point.location())
                     && !flightRestorer.canPromoteGamemode(player, returnGamemode, point.location()))
-                send(player, "locale.spawnbackFallWarning",
-                        "<gold>You can no longer fly there, so you will fall; a one-time fall protection will cover the landing.</gold>");
+            {
+
+                if (heldRegionalFlight && flightRestorer.canLoanFlight(player, point.location()))
+                    send(player, "locale.spawnbackLoanWarning",
+                            "<gold>You can no longer hold flight there, so you keep it only until you land.</gold>");
+                else
+                    send(player, "locale.spawnbackFallWarning",
+                            "<gold>You can no longer fly there, so you will fall; a one-time fall protection will cover the landing.</gold>");
+
+            }
+
             return true;
 
         }
@@ -206,7 +223,14 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
 
                 }
 
-                if (!restored) {
+                // A toggle flipped after the offer must not turn the way back
+                // into a drop: a proven flyer is lent flight until they land.
+                boolean gamemodeFlight = player.getGameMode() == GameMode.CREATIVE
+                        || player.getGameMode() == GameMode.SPECTATOR;
+                boolean loaned = !restored && heldRegionalFlight && !gamemodeFlight && flightRestorer.loanFlight(player)
+                        && player.getAllowFlight();
+
+                if (!restored && !loaned) {
 
                     // Inert while another authority still allows flight;
                     // granted only when the landing can actually hurt.
@@ -220,7 +244,17 @@ public final class SpawnBackCommand implements CommandExecutor, TabCompleter, Li
                         send(player, "locale.returnFlightDenied",
                                 "<gold>You don't have the authority to fly here.</gold>");
 
+                } else if (loaned) {
+
+                    send(player, "locale.returnFlightLoaned",
+                            "<gold>You cannot hold flight here, so you keep it only until you land.</gold>");
+
                 }
+
+                // The toggle is state too: a return that handed flight back
+                // re-arms /fly, so the next flight region behaves as before.
+                if (point.mode() == FlightMode.FLY && (restored || loaned))
+                    flightRestorer.rememberFlightIntent(player);
 
                 // Cleared only after the restore attempt, so the one-shot record
                 // is never burned before its flight decision has been made.

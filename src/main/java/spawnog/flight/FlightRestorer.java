@@ -144,6 +144,40 @@ public final class FlightRestorer {
 
     }
 
+    // Whether that loan could be handed out at the destination: flight
+    // permission, and a spot no nofly rule denies them.
+    public boolean canLoanFlight(Player player, Location destination) {
+
+        if (regionFlightService == null || player == null || !regionFlightService.hasFlightPermission(player))
+            return false;
+
+        return regionFlightService.ruleKindAt(destination) != RegionFlightService.RuleKind.NOFLY
+                || regionFlightService.hasBypass(player);
+
+    }
+
+    // The mode a player's persisted toggles amount to right now. A rescue with
+    // no airborne snapshot records this, so a grounded /fly is still remembered.
+    public FlightMode liveMode(Player player, GameMode gamemode) {
+
+        if (player == null)
+            return FlightMode.NONE;
+
+        boolean noclip = noClipAuthority != null && noClipAuthority.hasNoClipIntent(player);
+        return FlightMode.classify(gamemode, noclip,
+                regionFlightService != null && regionFlightService.hasFlightIntent(player));
+
+    }
+
+    // Puts the /fly toggle itself back after a restore honored it, so the
+    // choice survives a return that landed outside a flight region.
+    public void rememberFlightIntent(Player player) {
+
+        if (regionFlightService != null)
+            regionFlightService.rememberFlightIntent(player);
+
+    }
+
     private boolean flyPermitted(Player player, Location destination) {
 
         return regionFlightService != null && regionFlightService.hasFlightPermission(player)

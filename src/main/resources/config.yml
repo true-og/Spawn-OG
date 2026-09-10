@@ -86,12 +86,16 @@ locale:
   spawnbackWarning: "<gold>You were moved from <red><x>, <y>, <z></red> in <world> because <red><reason></red>. Run <click:run_command:'/spawnback'><hover:show_text:'<gold>Click to run <red>/spawnback</red> again</gold>'><red>/spawnback</red></hover></click> again within <seconds> seconds to go back anyway; you may take damage or die.</gold>"
   # Appended to the warning when the player's flight cannot be restored there.
   spawnbackFallWarning: "<gold>You can no longer fly there, so you will fall; a one-time fall protection will cover the landing.</gold>"
+  # Appended instead when flight can only be lent for the descent.
+  spawnbackLoanWarning: "<gold>You can no longer hold flight there, so you keep it only until you land.</gold>"
   spawnbackExecuted: "<gold>Returning you to <red><x>, <y>, <z></red> in <world>. Good luck.</gold>"
   # Sent when a plain return had to move up to the nearest clear spot above the recorded location.
   spawnbackAdjusted: "<gold>The spot you left was no longer safe to stand in, so you were placed at the nearest safe location above it.</gold>"
   # Sent when the return point forbids the player's prior mode of flight.
   # Fall damage is cancelled once on any return that restores no flight.
   returnFlightDenied: "<gold>You don't have the authority to fly here.</gold>"
+  # Sent when the return point lends flight for the descent instead of restoring it.
+  returnFlightLoaned: "<gold>You cannot hold flight here, so you keep it only until you land.</gold>"
   returnNone: "<red>You have no location to return to.</red>"
   returnWorldMissing: "<red>The world you were in (<world>) is not loaded, so you cannot return there.</red>"
   returnBusy: "<red>Your login is still being made safe. Try again in a few seconds.</red>"
