@@ -3,7 +3,7 @@ description: Safe player entry, spawn management, and WorldGuard regional flight
 version: '${version}'
 api-version: '${apiVersion}'
 authors: [ kasumabalidps, NotAlexNoyle ]
-website: https://github.com/true-og/Spawn-OG
+website: https://git.trueog.net/trueog/Spawn-OG
 main: spawnog.SpawnOG
 softdepend: [LuckPerms, WorldEdit, WorldGuard, GameModeInventories-OG, NoClip-OG, MyWorlds, My_Worlds]
 loadbefore: [Essentials, Essentials-OG]
